@@ -94,12 +94,13 @@ namespace MachineLearning {
             Task.Run(() => {
                 if (Sys.isDebug) {
 
-                    theNetwork.SGD(30, 3, 3.0);
+                    theNetwork.SGD(30, 1, 3.0);
                 }
                 else {
 
                     //theNetwork.SGD(30, 11, 3.0);
-                    theNetwork.SGD(30, 12, 10.0);
+                    //theNetwork.SGD(30, 12, 10.0);
+                    theNetwork.SGD(30, 10, 10.0);
                 }
             });
 
@@ -881,6 +882,10 @@ namespace MachineLearning {
             dt = init;
         }
 
+        public Array4 Clone() {
+            return new Array4((double[,,,])dt.Clone());
+        }
+
         public override Array GetData() {
             return dt;
         }
@@ -931,6 +936,26 @@ namespace MachineLearning {
             }
 
             return m;
+        }
+
+        public double Max() {
+            int n0 = dt.GetLength(0);
+            int n1 = dt.GetLength(1);
+            int n2 = dt.GetLength(2);
+            int n3 = dt.GetLength(3);
+            double max = Double.MinValue;
+
+            for (int i = 0; i < n0; i++) {
+                for (int j = 0; j < n1; j++) {
+                    for (int k = 0; k < n2; k++) {
+                        for (int l = 0; l < n3; l++) {
+                            max = Math.Max(max, dt[i, j, k, l]);
+                        }
+                    }
+                }
+            }
+
+            return max;
         }
     }
 }
