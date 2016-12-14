@@ -67,6 +67,7 @@ namespace MachineLearning {
 
     public class InputLayer : Layer {
         public Array2 Activation2;
+        public Array3 Activation3;
 
         public InputLayer(int rows, int cols) : base() {
             ImgRows = rows;
@@ -76,16 +77,6 @@ namespace MachineLearning {
 
         public override Array2 GetActivation2() {
             return Activation2;
-        }
-    }
-
-    public class InputLayer2 : Layer {
-        public Array3 Activation3;
-
-        public InputLayer2(int rows, int cols) : base() {
-            ImgRows = rows;
-            ImgCols = cols;
-            UnitSize = rows * cols;
         }
 
         public override Array3 GetActivation3() {
@@ -159,8 +150,8 @@ namespace MachineLearning {
 
                 NablaBiases = this.Delta;
                 // constructor(rows, cols, init, column_major, depth)
-                NablaWeights = new Array3(ParentNetwork.BatchLength, Weight.nRow, Weight.nCol);
-                for (int batch_idx = 0; batch_idx < ParentNetwork.BatchLength; batch_idx++) {
+                NablaWeights = new Array3(ParentNetwork.MiniBatchSize, Weight.nRow, Weight.nCol);
+                for (int batch_idx = 0; batch_idx < ParentNetwork.MiniBatchSize; batch_idx++) {
                     for (int r = 0; r < Weight.nRow; r++) {
                         for (int c = 0; c < Weight.nCol; c++) {
                             NablaWeights[batch_idx, r, c] = PrevLayer.GetActivation2()[batch_idx, r] * this.Delta[batch_idx, c];
@@ -208,16 +199,16 @@ namespace MachineLearning {
         }
 
         public override void Forward() {
-            if (Z == null || ! Z.Shape().Equals( new int[] { ParentNetwork.BatchLength, ImgRows, ImgCols, FilterCount } ) ) {
+            if (Z == null || ! Z.Shape().Equals( new int[] { ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount } ) ) {
 
-                Z = new Array4(ParentNetwork.BatchLength, ImgRows, ImgCols, FilterCount);
-                Activation4 = new Array4(ParentNetwork.BatchLength, ImgRows, ImgCols, FilterCount);
+                Z = new Array4(ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount);
+                Activation4 = new Array4(ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount);
             }
 
             Array3 prev_activation = PrevLayer.GetActivation3();
 
             // バッチ内のデータに対し
-            for (int batch_idx = 0; batch_idx < ParentNetwork.BatchLength; batch_idx++) {
+            for (int batch_idx = 0; batch_idx < ParentNetwork.MiniBatchSize; batch_idx++) {
 
                 // 出力の行に対し
                 for (int r1 = 0; r1 < ImgRows; r1++) {
@@ -262,7 +253,7 @@ namespace MachineLearning {
 
             NablaBiases = new Array1(FilterCount);
             NablaWeights = new Array3(FilterCount, FilterSize, FilterSize);
-            CostDerivative = new Array4(ParentNetwork.BatchLength, ImgRows, ImgCols, FilterCount);
+            CostDerivative = new Array4(ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount);
 
             // すべてのフィルターに対し
             for (int filter_idx = 0; filter_idx < FilterCount; filter_idx++) {
@@ -270,7 +261,7 @@ namespace MachineLearning {
                 double nabla_b = 0.0;
 
                 // バッチ内のデータに対し
-                for (int batch_idx = 0; batch_idx < ParentNetwork.BatchLength; batch_idx++) {
+                for (int batch_idx = 0; batch_idx < ParentNetwork.MiniBatchSize; batch_idx++) {
 
                     // 出力の行に対し
                     for (int r1 = 0; r1 < ImgRows; r1++) {
@@ -299,7 +290,7 @@ namespace MachineLearning {
                         double nabla_w = 0.0;
 
                         // バッチ内のデータに対し
-                        for (int batch_idx = 0; batch_idx < ParentNetwork.BatchLength; batch_idx++) {
+                        for (int batch_idx = 0; batch_idx < ParentNetwork.MiniBatchSize; batch_idx++) {
 
                             // 出力の行に対し
                             for (int r1 = 0; r1 < ImgRows; r1++) {
@@ -371,12 +362,12 @@ namespace MachineLearning {
 
         public override void Forward() {
             ConvolutionalLayer prev_Layer = PrevLayer as ConvolutionalLayer;
-            Activation4 = new Array4(ParentNetwork.BatchLength, ImgRows, ImgCols, FilterCount);
+            Activation4 = new Array4(ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount);
 
-            MaxIdx = new int[ParentNetwork.BatchLength, ImgRows, ImgCols, FilterCount];
+            MaxIdx = new int[ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount];
 
             // バッチ内のデータに対し
-            for (int batch_idx = 0; batch_idx < ParentNetwork.BatchLength; batch_idx++) {
+            for (int batch_idx = 0; batch_idx < ParentNetwork.MiniBatchSize; batch_idx++) {
 
                 // すべての行に対し
                 for (int r1 = 0; r1 < ImgRows; r1++) {
@@ -424,7 +415,7 @@ namespace MachineLearning {
             DeltaT = new Array4(prev_Layer.Activation4.Shape());
 
             // バッチ内のデータに対し
-            for (int batch_idx = 0; batch_idx < ParentNetwork.BatchLength; batch_idx++) {
+            for (int batch_idx = 0; batch_idx < ParentNetwork.MiniBatchSize; batch_idx++) {
 
                 // すべての行に対し
                 for (int r1 = 0; r1 < ImgRows; r1++) {
@@ -453,7 +444,7 @@ namespace MachineLearning {
 
 
     public class Network {
-        public int BatchLength;
+        public int MiniBatchSize;
         public Layer[] Layers;
 
         public byte[,] TrainImage;
@@ -476,8 +467,12 @@ namespace MachineLearning {
             get { return Layers[Layers.Length - 1]; }
         }
 
+        public InputLayer FirstLayer {
+            get { return Layers[0] as InputLayer; }
+        }
+
         public void SGD(int epochs, int mini_batch_size, double eta) {
-            BatchLength = mini_batch_size;
+            MiniBatchSize = mini_batch_size;
 
             int train_cnt = TrainImage.GetLength(0);
             int data_len = TrainImage.GetLength(1);
@@ -485,13 +480,13 @@ namespace MachineLearning {
 
                 int[] idxes = Sys.RandomSampling(train_cnt, train_cnt);
 
-                int mini_batch_cnt = train_cnt / BatchLength;
+                int mini_batch_cnt = train_cnt / MiniBatchSize;
                 for (int mini_batch_idx = 0; mini_batch_idx < mini_batch_cnt; mini_batch_idx++ ) {
-                    Array2 X = new Array2(BatchLength, data_len);
-                    Array2 Y = new Array2(BatchLength, 10);
+                    Array2 X = new Array2(MiniBatchSize, data_len);
+                    Array2 Y = new Array2(MiniBatchSize, 10);
 
-                    for (int batch_idx = 0; batch_idx < BatchLength; batch_idx++) {
-                        var idx = idxes[mini_batch_idx * BatchLength + batch_idx ];
+                    for (int batch_idx = 0; batch_idx < MiniBatchSize; batch_idx++) {
+                        var idx = idxes[mini_batch_idx * MiniBatchSize + batch_idx ];
                         Y[batch_idx, TrainLabel[idx]] = 1;
 
                         for(int k = 0; k < data_len; k++) {
@@ -501,7 +496,7 @@ namespace MachineLearning {
 
                     UpdateMiniBatch(X, Y, eta);
 
-                    if(mini_batch_idx % 100 == 0) {
+                    if(mini_batch_idx % 1000 == 0) {
                         Debug.WriteLine("mini batch idx {0}", mini_batch_idx);
                     }
                 }
@@ -601,21 +596,20 @@ namespace MachineLearning {
         }
 
         void UpdateMiniBatch(Array2 X, Array2 Y, double eta) {
-            if(Layers[0] is InputLayer) {
+            if(FirstLayer.NextLayer is FullyConnectedLayer) {
 
-                (Layers[0] as InputLayer).Activation2 = X;
+                FirstLayer.Activation2 = X;
             }
             else {
 
-                InputLayer2 input_layer2 = Layers[0] as InputLayer2;
-                input_layer2.Activation3 = (Array3)X.Reshape(X.nRow, input_layer2.ImgRows, input_layer2.ImgCols);
+                FirstLayer.Activation3 = (Array3)X.Reshape(MiniBatchSize, FirstLayer.ImgRows, FirstLayer.ImgCols);
             }
 
             foreach (Layer layer in Layers) {
                 layer.forward2();
             }
 
-            double eta2 = eta / BatchLength;
+            double eta2 = eta / MiniBatchSize;
 
             for (int i = Layers.Length - 1; 1 <= i; i--) {
                 Layers[i].backward2(Y, eta2);
@@ -643,14 +637,13 @@ namespace MachineLearning {
                 }
             }
 
-            if (Layers[0] is InputLayer) {
+            if (FirstLayer.NextLayer is FullyConnectedLayer) {
 
-                (Layers[0] as InputLayer).Activation2 = X;
+                FirstLayer.Activation2 = X;
             }
             else {
 
-                InputLayer2 input_layer2 = Layers[0] as InputLayer2;
-                input_layer2.Activation3 = (Array3)X.Reshape(X.nRow, input_layer2.ImgRows, input_layer2.ImgCols);
+                FirstLayer.Activation3 = (Array3)X.Reshape(test_cnt, FirstLayer.ImgRows, FirstLayer.ImgCols);
             }
 
             foreach (Layer layer in Layers) {

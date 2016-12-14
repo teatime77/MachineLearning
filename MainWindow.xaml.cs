@@ -433,7 +433,7 @@ namespace MachineLearning {
         }
 
         public static Array1 operator -(Array1 a, Array1 b) {
-            return new Array1(from i in Enumerable.Range(0, a.Length) select a[i] - b[i]);
+            return new Array1(from i in Enumerable.Range(0, a.Length) select a.dt[i] - b.dt[i]);
         }
 
         public static Array1 operator *(double a, Array1 v) {
@@ -448,7 +448,7 @@ namespace MachineLearning {
             Array1 m3 = new Array1(Length);
 
             for (int r = 0; r < Length; r++) {
-                m3[r] = fnc(this[r], m1[r]);
+                m3.dt[r] = fnc(this.dt[r], m1.dt[r]);
             }
 
             return m3;
@@ -530,7 +530,7 @@ namespace MachineLearning {
 
             for (int r = 0; r < nRow; r++) {
                 for (int c = 0; c < nCol; c++) {
-                    m[c, r] = dt[r, c];
+                    m.dt[c, r] = dt[r, c];
                 }
             }
 
@@ -543,7 +543,7 @@ namespace MachineLearning {
             Array2 m = new Array2(a.nRow, a.nCol);
             for (int r = 0; r < a.nRow; r++) {
                 for (int c = 0; c < a.nCol; c++) {
-                    m[r, c] = a[r, c] + b[r, c];
+                    m.dt[r, c] = a.dt[r, c] + b.dt[r, c];
                 }
             }
 
@@ -556,7 +556,7 @@ namespace MachineLearning {
             Array2 m = new Array2(a.nRow, a.nCol);
             for (int r = 0; r < a.nRow; r++) {
                 for (int c = 0; c < a.nCol; c++) {
-                    m[r, c] = a[r, c] - b[r, c];
+                    m.dt[r, c] = a.dt[r, c] - b.dt[r, c];
                 }
             }
 
@@ -569,7 +569,7 @@ namespace MachineLearning {
             Array2 m = new Array2(a.nRow, a.nCol);
             for (int r = 0; r < a.nRow; r++) {
                 for (int c = 0; c < a.nCol; c++) {
-                    m[r, c] = a[r, c] * b[r, c];
+                    m.dt[r, c] = a.dt[r, c] * b.dt[r, c];
                 }
             }
 
@@ -583,7 +583,7 @@ namespace MachineLearning {
             Array2 m = new Array2(a.nRow, a.nCol);
             for (int r = 0; r < a.nRow; r++) {
                 for (int c = 0; c < a.nCol; c++) {
-                    m[r, c] = a[r, c] + b[c];
+                    m.dt[r, c] = a.dt[r, c] + b.dt[c];
                 }
             }
 
@@ -596,7 +596,7 @@ namespace MachineLearning {
 
             for (int r = 0; r < b.nRow; r++) {
                 for (int c = 0; c < b.nCol; c++) {
-                    m[r, c] = a * b[r, c];
+                    m.dt[r, c] = a * b.dt[r, c];
                 }
             }
 
@@ -611,9 +611,9 @@ namespace MachineLearning {
                 for (int c = 0; c < m.nCol; c++) {
                     double sum = 0;
                     for (int k = 0; k < nCol; k++) {
-                        sum += dt[r, k] * m[k, c];
+                        sum += dt[r, k] * m.dt[k, c];
                     }
-                    ret[r, c] = sum;
+                    ret.dt[r, c] = sum;
                 }
             }
 
@@ -641,7 +641,7 @@ namespace MachineLearning {
 
             for (int r = 0; r < nRow; r++) {
                 for (int c = 0; c < nCol; c++) {
-                    ret[r, c] = fnc(dt[r, c]);
+                    ret.dt[r, c] = fnc(dt[r, c]);
                 }
             }
 
@@ -653,7 +653,7 @@ namespace MachineLearning {
 
             for (int r = 0; r < nRow; r++) {
                 for (int c = 0; c < nCol; c++) {
-                    m3[r, c] = fnc(this[r, c], m1[r, c]);
+                    m3.dt[r, c] = fnc(this.dt[r, c], m1.dt[r, c]);
                 }
             }
 
@@ -747,7 +747,7 @@ namespace MachineLearning {
             for(int d = 0; d < a.nDepth; d++) {
                 for (int r = 0; r < a.nRow; r++) {
                     for (int c = 0; c < a.nCol; c++) {
-                        m[d, r, c] = a[d, r, c] + b[d, r, c];
+                        m.dt[d, r, c] = a.dt[d, r, c] + b.dt[d, r, c];
                     }
                 }
             }
@@ -762,7 +762,7 @@ namespace MachineLearning {
             for (int d = 0; d < b.nDepth; d++) {
                 for (int r = 0; r < b.nRow; r++) {
                     for (int c = 0; c < b.nCol; c++) {
-                        m[d, r, c] = a * b[d, r, c];
+                        m.dt[d, r, c] = a * b.dt[d, r, c];
                     }
                 }
             }
@@ -813,7 +813,7 @@ namespace MachineLearning {
             for (int d = 0; d < nDepth; d++) {
                 for (int r = 0; r < nRow; r++) {
                     for (int c = 0; c < nCol; c++) {
-                        m3[d, r, c] = fnc(this[d, r, c], m1[d, r, c]);
+                        m3.dt[d, r, c] = fnc(this.dt[d, r, c], m1.dt[d, r, c]);
                     }
                 }
             }
@@ -897,19 +897,19 @@ namespace MachineLearning {
             int n2 = a.dt.GetLength(2);
             int n3 = a.dt.GetLength(3);
 
-            double[,,,] m = new double[n0, n1, n2, n3];
+            Array4 m = new Array4(n0, n1, n2, n3);
 
             for (int i = 0; i < n0; i++) {
                 for (int j = 0; j < n1; j++) {
                     for (int k = 0; k < n2; k++) {
                         for (int l = 0; l < n3; l++) {
-                            m[i, j, k, l] = a[i, j, k, l] * b[i, j, k, l];
+                            m.dt[i, j, k, l] = a.dt[i, j, k, l] * b.dt[i, j, k, l];
                         }
                     }
                 }
             }
 
-            return new Array4(m);
+            return m;
         }
 
         public Array4 Map(F1 fnc) {
@@ -918,19 +918,19 @@ namespace MachineLearning {
             int n2 = dt.GetLength(2);
             int n3 = dt.GetLength(3);
 
-            double[,,,] m = new double[n0, n1, n2, n3];
+            Array4 m = new Array4(n0, n1, n2, n3);
 
             for(int i = 0; i < n0; i++) {
                 for (int j = 0; j < n1; j++) {
                     for (int k = 0; k < n2; k++) {
                         for (int l = 0; l < n3; l++) {
-                            m[i, j, k, l] = fnc(dt[i, j, k, l]);
+                            m.dt[i, j, k, l] = fnc(dt[i, j, k, l]);
                         }
                     }
                 }
             }
 
-            return new Array4(m);
+            return m;
         }
     }
 }
