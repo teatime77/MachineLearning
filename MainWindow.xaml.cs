@@ -48,13 +48,24 @@ namespace MachineLearning {
 
             string mnist_path = path + "\\MNIST";
 
-            theNetwork = new Network(new Layer[] {
-                new InputLayer(28, 28),
-                //new ConvolutionalLayer(5, 20),
-                //new PoolingLayer(2),
-                new FullyConnectedLayer(30),
-                new FullyConnectedLayer(10)
-            });
+            if (Sys.isCNN) {
+
+                theNetwork = new Network(new Layer[] {
+                    new InputLayer(28, 28),
+                    new ConvolutionalLayer(5, 20),
+                    new PoolingLayer(2),
+                    new FullyConnectedLayer(30),
+                    new FullyConnectedLayer(10)
+                });
+            }
+            else {
+
+                theNetwork = new Network(new Layer[] {
+                    new InputLayer(28, 28),
+                    new FullyConnectedLayer(30),
+                    new FullyConnectedLayer(10)
+                });
+            }
 
             byte[] buf;
 
@@ -938,6 +949,27 @@ namespace MachineLearning {
             return m;
         }
 
+        public Array4 Apply(F2 fnc, Array4 m1) {
+            int n0 = dt.GetLength(0);
+            int n1 = dt.GetLength(1);
+            int n2 = dt.GetLength(2);
+            int n3 = dt.GetLength(3);
+
+            Array4 m3 = new Array4(Shape());
+
+            for (int i = 0; i < n0; i++) {
+                for (int j = 0; j < n1; j++) {
+                    for (int k = 0; k < n2; k++) {
+                        for (int l = 0; l < n3; l++) {
+                            m3.dt[i, j, k, l] = fnc(dt[i, j, k, l], m1.dt[i, j, k, l]);
+                        }
+                    }
+                }
+            }
+
+            return m3;
+        }
+
         public double Max() {
             int n0 = dt.GetLength(0);
             int n1 = dt.GetLength(1);
@@ -957,6 +989,11 @@ namespace MachineLearning {
 
             return max;
         }
+
+        public static Array4 operator -(Array4 a, Array4 b) {
+            return a.Apply((x, y) => x - y, b);
+        }
+
     }
 }
 

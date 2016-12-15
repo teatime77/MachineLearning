@@ -91,12 +91,12 @@ namespace MachineLearning {
 
     public class FullyConnectedLayer : Layer {
         public Array2 Activation2;
-        public Array2 Z;
+        public Array2 Z2;
         public Array2 CostDerivative2;
         public Array1 Cost;
 
         public Array2 svActivation2;
-        public Array2 svZ;
+        public Array2 svZ2;
         public Array2 svCostDerivative2;
 
         public Array1 Bias;
@@ -126,8 +126,8 @@ namespace MachineLearning {
         }
 
         public override void Forward() {
-            Z = PrevLayer.GetActivation2().Dot(Weight) + Bias;
-            Activation2 = Z.Map(Sys.Sigmoid);
+            Z2 = PrevLayer.GetActivation2().Dot(Weight) + Bias;
+            Activation2 = Z2.Map(Sys.Sigmoid);
         }
 
         public override void Backward(Array2 Y, double eta2) {
@@ -144,9 +144,21 @@ namespace MachineLearning {
                 // 最後のレイヤーでない場合
 
                 FullyConnectedLayer next_layer = NextLayer as FullyConnectedLayer;
+
+                // next.(dC/dA)
+                // dC/dAj = Σ dC/d(next.Zk) * d(next.Zk)/dAj = Σ dC/d(next.Zk) * Wk
+                // d(next.Z)/dA = d(Σ Wk * Ak)/dA = Σ Wk * d(Ak)/dA
+
+                // next_layer.Delta = dC/d(next.Z) = dC/d(Σ next.Wk * Ak)
+                // next.Zk = Σ next.Wki * Ai
+
+                // dC/dAi = Σ dC/d(next.Zk) * d(next.Zk)/dAi = 
+
                 CostDerivative2 = next_layer.Delta.Dot(next_layer.Weight.T());
             }
-            this.Delta = CostDerivative2 * Z.Map(Sys.SigmoidPrime);
+
+            // dC/dZ = dC/dA * dA/dZ
+            this.Delta = CostDerivative2 * Z2.Map(Sys.SigmoidPrime);
 
             NablaB = new Array1(from c in Delta.Cols() select c.Sum());
             NablaW = PrevLayer.GetActivation2().T().Dot( this.Delta );
@@ -173,20 +185,23 @@ namespace MachineLearning {
     }
 
     public class Layer4 : Layer {
+        public Array4 Activation4;
+
+        public Array4 svActivation4;
         public Array4 svCostDerivative4;
         public Array4 CostDerivative4;
     }
 
     public class ConvolutionalLayer : Layer4 {
-        public Array4 Activation4;
-        public Array4 Z;
+        public Array4 Z4;
+        public Array4 svZ4;
 
         public int FilterSize;
         public int FilterCount;
-        public Array1 Biases;
-        public Array3 Weights;
-        public Array1 NablaBiases;
-        public Array3 NablaWeights;
+        public Array1 Bias;
+        public Array3 Weight3;
+        public Array2 NablaBiases;
+        public Array4 NablaWeight4;
 
         public ConvolutionalLayer(int filter_size, int filter_count) : base() {
             FilterSize = filter_size;
@@ -206,14 +221,14 @@ namespace MachineLearning {
             ImgCols = PrevLayer.ImgCols - FilterSize + 1;
             UnitSize = ImgRows * ImgCols * FilterCount;
 
-            Biases = TNormalRandom.randn(FilterCount);
-            Weights = (new Array3(FilterCount, FilterSize, FilterSize)).Set(TNormalRandom.NormalRandom.NextDouble); 
+            Bias = TNormalRandom.randn(FilterCount);
+            Weight3 = (new Array3(FilterCount, FilterSize, FilterSize)).Set(TNormalRandom.NormalRandom.NextDouble); 
         }
 
         public override void Forward() {
-            if (Z == null || !Enumerable.SequenceEqual(Z.Shape(), new int[] { ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount }) ) {
+            if (Z4 == null || !Enumerable.SequenceEqual(Z4.Shape(), new int[] { ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount }) ) {
 
-                Z = new Array4(ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount);
+                Z4 = new Array4(ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount);
                 Activation4 = new Array4(ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount);
             }
 
@@ -238,14 +253,14 @@ namespace MachineLearning {
 
                                 // フィルターの列に対し
                                 for (int c2 = 0; c2 < FilterSize; c2++) {
-                                    sum += prev_activation.dt[batch_idx, r1 + r2, c1 + c2] * Weights.dt[filter_idx, r2, c2];
+                                    sum += prev_activation.dt[batch_idx, r1 + r2, c1 + c2] * Weight3.dt[filter_idx, r2, c2];
                                 }
                             }
 
                             // 出力
-                            double z_val = sum + Biases.dt[filter_idx];
+                            double z_val = sum + Bias.dt[filter_idx];
 
-                            Z.dt[batch_idx, r1, c1, filter_idx] = z_val;
+                            Z4.dt[batch_idx, r1, c1, filter_idx] = z_val;
                             Activation4.dt[batch_idx, r1, c1, filter_idx] = Sys.Sigmoid(z_val);
                         }
                     }
@@ -256,22 +271,22 @@ namespace MachineLearning {
         public override void Backward(Array2 Y, double eta2) {
             PoolingLayer next_layer = NextLayer as PoolingLayer;
 
-            //this.Delta = NextLayer.Delta.Mul(SigmoidPrime(Z));
-            Array4 deltaT = next_layer.Delta * Z.Map(Sys.SigmoidPrime);
+            //this.Delta = NextLayer.Delta.Mul(SigmoidPrime(Z4));
+            Array4 deltaT = next_layer.Delta * Z4.Map(Sys.SigmoidPrime);
 
             Array3 prev_activation = PrevLayer.GetActivation3();
 
-            NablaBiases = new Array1(FilterCount);
-            NablaWeights = new Array3(FilterCount, FilterSize, FilterSize);
+            NablaBiases = new Array2(ParentNetwork.MiniBatchSize, FilterCount);
+            NablaWeight4 = new Array4(ParentNetwork.MiniBatchSize, FilterCount, FilterSize, FilterSize);
             CostDerivative4 = new Array4(ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount);
 
             // すべてのフィルターに対し
             for (int filter_idx = 0; filter_idx < FilterCount; filter_idx++) {
 
-                double nabla_b = 0.0;
-
                 // バッチ内のデータに対し
                 for (int batch_idx = 0; batch_idx < ParentNetwork.MiniBatchSize; batch_idx++) {
+
+                    double nabla_b = 0.0;
 
                     // 出力の行に対し
                     for (int r1 = 0; r1 < ImgRows; r1++) {
@@ -283,9 +298,9 @@ namespace MachineLearning {
                             CostDerivative4[batch_idx, r1, c1, filter_idx] = next_layer.Delta[batch_idx, r1, c1, filter_idx];
                         }
                     }
-                }
 
-                NablaBiases[filter_idx] = nabla_b;
+                    NablaBiases[batch_idx, filter_idx] = nabla_b;
+                }
             }
 
             // すべてのフィルターに対し
@@ -297,10 +312,10 @@ namespace MachineLearning {
                     // フィルターの列に対し
                     for (int c2 = 0; c2 < FilterSize; c2++) {
 
-                        double nabla_w = 0.0;
-
                         // バッチ内のデータに対し
                         for (int batch_idx = 0; batch_idx < ParentNetwork.MiniBatchSize; batch_idx++) {
+
+                            double nabla_w = 0.0;
 
                             // 出力の行に対し
                             for (int r1 = 0; r1 < ImgRows; r1++) {
@@ -315,9 +330,9 @@ namespace MachineLearning {
                                     }
                                 }
                             }
-                        }
 
-                        NablaWeights[filter_idx, r2, c2] = nabla_w;
+                            NablaWeight4[batch_idx, filter_idx, r2, c2] = nabla_w;
+                        }
                     }
                 }
             }
@@ -329,16 +344,22 @@ namespace MachineLearning {
             // すべてのフィルターに対し
             for (int filter_idx = 0; filter_idx < FilterCount; filter_idx++) {
 
-                Biases[filter_idx] -= eta3 * NablaBiases[filter_idx];
+                double nabla_bias = (from batch_idx in Enumerable.Range(0, ParentNetwork.MiniBatchSize) select NablaBiases[batch_idx, filter_idx]).Sum();
+                Bias[filter_idx] -= eta3 * nabla_bias;
 
                 // フィルターの行に対し
                 for (int r2 = 0; r2 < FilterSize; r2++) {
 
                     // フィルターの列に対し
                     for (int c2 = 0; c2 < FilterSize; c2++) {
-                        double nabla_w = NablaWeights[filter_idx, r2, c2];
+                        double nabla_w = 0;
 
-                        Weights[filter_idx, r2, c2] -= eta3 * nabla_w;
+                        // バッチ内のデータに対し
+                        for (int batch_idx = 0; batch_idx < ParentNetwork.MiniBatchSize; batch_idx++) {
+                            nabla_w += NablaWeight4[batch_idx, filter_idx, r2, c2];
+                        }
+
+                        Weight3[filter_idx, r2, c2] -= eta3 * nabla_w;
                     }
                 }
             }
@@ -349,7 +370,6 @@ namespace MachineLearning {
     public class PoolingLayer : Layer4 {
         public int FilterSize;
         public int FilterCount;
-        public Array4 Activation4;
         public Array2 Activation2;
         public Array2 svActivation2;
         public int[,,,] MaxIdx;
@@ -602,7 +622,9 @@ namespace MachineLearning {
     public class Sys {
         public static bool isFloat64 = true;// isDebug;
         public static bool DebugOut = true;
+
         public static bool isDebug = false;
+        public static bool isCNN = false;
 
         public static double Sigmoid(double z){
             return 1.0 / (1.0 + Math.Exp(-z));
