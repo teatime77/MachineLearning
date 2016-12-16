@@ -52,7 +52,8 @@ namespace MachineLearning {
 
                 theNetwork = new Network(new Layer[] {
                     new InputLayer(28, 28),
-                    new ConvolutionalLayer(5, 20),
+                    //new ConvolutionalLayer(5, 20),
+                    new ConvolutionalLayer(10, 2),
                     new PoolingLayer(2),
                     new FullyConnectedLayer(30),
                     new FullyConnectedLayer(10)
@@ -397,7 +398,7 @@ namespace MachineLearning {
             }
 
             Debug.Assert(src.Length == dst.Length, "Array-N-Get-Data");
-            Buffer.BlockCopy(src, 0, dst, 0, src.Length);
+            Buffer.BlockCopy(src, 0, dst, 0, sizeof(double) * src.Length);
 
             switch (args.Length) {
             case 1:
@@ -440,12 +441,20 @@ namespace MachineLearning {
         }
 
         public double this[int i] {
-            set { this.dt[i] = value; }
-            get { return this.dt[i]; }
+            set { dt[i] = value; }
+            get { return dt[i]; }
+        }
+
+        public static Array1 operator +(Array1 a, Array1 b) {
+            return new Array1(from i in Enumerable.Range(0, a.Length) select a.dt[i] + b.dt[i]);
         }
 
         public static Array1 operator -(Array1 a, Array1 b) {
             return new Array1(from i in Enumerable.Range(0, a.Length) select a.dt[i] - b.dt[i]);
+        }
+
+        public static Array1 operator *(Array1 a, Array1 b) {
+            return new Array1(from i in Enumerable.Range(0, a.Length) select a.dt[i] * b.dt[i]);
         }
 
         public static Array1 operator *(double a, Array1 v) {
@@ -460,7 +469,7 @@ namespace MachineLearning {
             Array1 m3 = new Array1(Length);
 
             for (int r = 0; r < Length; r++) {
-                m3.dt[r] = fnc(this.dt[r], m1.dt[r]);
+                m3.dt[r] = fnc(dt[r], m1.dt[r]);
             }
 
             return m3;
@@ -533,8 +542,8 @@ namespace MachineLearning {
         }
 
         public double this[int i, int j] {
-            set { this.dt[i, j] = value; }
-            get { return this.dt[i, j]; }
+            set { dt[i, j] = value; }
+            get { return dt[i, j]; }
         }
 
         public Array2 T() {
@@ -665,7 +674,7 @@ namespace MachineLearning {
 
             for (int r = 0; r < nRow; r++) {
                 for (int c = 0; c < nCol; c++) {
-                    m3.dt[r, c] = fnc(this.dt[r, c], m1.dt[r, c]);
+                    m3.dt[r, c] = fnc(dt[r, c], m1.dt[r, c]);
                 }
             }
 
@@ -748,8 +757,8 @@ namespace MachineLearning {
         }
 
         public double this[int i, int j, int k] {
-            set { this.dt[i, j, k] = value; }
-            get { return this.dt[i, j, k]; }
+            set { dt[i, j, k] = value; }
+            get { return dt[i, j, k]; }
         }
 
         public static Array3 operator +(Array3 a, Array3 b) {
@@ -825,7 +834,7 @@ namespace MachineLearning {
             for (int d = 0; d < nDepth; d++) {
                 for (int r = 0; r < nRow; r++) {
                     for (int c = 0; c < nCol; c++) {
-                        m3.dt[d, r, c] = fnc(this.dt[d, r, c], m1.dt[d, r, c]);
+                        m3.dt[d, r, c] = fnc(dt[d, r, c], m1.dt[d, r, c]);
                     }
                 }
             }
@@ -866,9 +875,9 @@ namespace MachineLearning {
             for (int d = 0; d < nDepth; d++) {
                 for (int r = 0; r < nRow; r++) {
                     for (int c = 0; c < nCol; c++) {
-                        sw.Write("\t{0}", dt[d, r, c]);
+                        sw.Write(",{0}", dt[d, r, c]);
                     }
-                    sw.Write("\t ");
+                    sw.Write(", ");
                 }
 
                 sw.WriteLine();
@@ -902,8 +911,27 @@ namespace MachineLearning {
         }
 
         public double this[int i, int j, int k, int l] {
-            set { this.dt[i, j, k, l] = value; }
-            get { return this.dt[i, j, k, l]; }
+            set { dt[i, j, k, l] = value; }
+            get { return dt[i, j, k, l]; }
+        }
+
+        public Array1 At3(int j, int k, int l) {
+            int n0 = dt.GetLength(0);
+            Array1 m = new Array1(n0);
+
+            for(int i = 0; i < n0; i++) {
+                m.dt[i] = dt[i, j, k, l];
+            }
+
+            return m;
+        }
+
+        public void Set3(int j, int k, int l, Array1 m) {
+            int n0 = dt.GetLength(0);
+
+            for (int i = 0; i < n0; i++) {
+                dt[i, j, k, l] = m.dt[i];
+            }
         }
 
         public static Array4 operator *(Array4 a, Array4 b) {

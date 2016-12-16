@@ -49,7 +49,7 @@ namespace MachineLearning {
         public virtual void Forward() {
         }
 
-        public virtual void Backward(Array2 Y, double eta2) {
+        public virtual void Backward(Array2 Y) {
         }
 
         public void forward2() {
@@ -59,9 +59,9 @@ namespace MachineLearning {
             FwTime += (DateTime.Now - startTime).TotalMilliseconds;
         }
 
-        public void backward2(Array2 Y, double eta2) {
+        public void backward2(Array2 Y) {
             DateTime startTime = DateTime.Now;
-            Backward(Y, eta2);
+            Backward(Y);
             BwCnt++;
             BwTime += (DateTime.Now - startTime).TotalMilliseconds;
         }
@@ -92,12 +92,12 @@ namespace MachineLearning {
     public class FullyConnectedLayer : Layer {
         public Array2 Activation2;
         public Array2 Z2;
-        public Array2 CostDerivative2;
+        public Array2 dC_dA2;
         public Array1 Cost;
 
         public Array2 svActivation2;
         public Array2 svZ2;
-        public Array2 svCostDerivative2;
+        public Array2 svdC_dA2;
 
         public Array1 Bias;
         public Array2 Weight;
@@ -105,7 +105,7 @@ namespace MachineLearning {
         public Array1 NablaB;
         public Array2 NablaW;
 
-        public Array2 Delta;
+        public Array2 dC_dZ2;
         public Array2 NablaBiases;
         public Array3 NablaWeights;
 
@@ -130,48 +130,41 @@ namespace MachineLearning {
             Activation2 = Z2.Map(Sys.Sigmoid);
         }
 
-        public override void Backward(Array2 Y, double eta2) {
+        public override void Backward(Array2 Y) {
             if (NextLayer == null) {
                 // 最後のレイヤーの場合
 
-                CostDerivative2 = Sys.CostDerivative(Activation2, Y);
+                dC_dA2 = Sys.CostDerivative(Activation2, Y);
 
                 // cost = 1/2 * Σ xi*xi
-                //Cost = xrange(CostDerivative2.nCol).map(c => CostDerivative2.Col(c).dt.map(x => x * x).reduce((x, y) => x + y)).map(x => x / 2);
-                Cost = new Array1( from r in CostDerivative2.Rows() select r.Map(x => x * x).Sum() / 2 );
+                //Cost = xrange(dC_dA2.nCol).map(c => dC_dA2.Col(c).dt.map(x => x * x).reduce((x, y) => x + y)).map(x => x / 2);
+                Cost = new Array1( from r in dC_dA2.Rows() select r.Map(x => x * x).Sum() / 2 );
             }
             else {
                 // 最後のレイヤーでない場合
 
                 FullyConnectedLayer next_layer = NextLayer as FullyConnectedLayer;
 
-                // next.(dC/dA)
-                // dC/dAj = Σ dC/d(next.Zk) * d(next.Zk)/dAj = Σ dC/d(next.Zk) * Wk
-                // d(next.Z)/dA = d(Σ Wk * Ak)/dA = Σ Wk * d(Ak)/dA
-
-                // next_layer.Delta = dC/d(next.Z) = dC/d(Σ next.Wk * Ak)
-                // next.Zk = Σ next.Wki * Ai
-
-                // dC/dAi = Σ dC/d(next.Zk) * d(next.Zk)/dAi = 
-
-                CostDerivative2 = next_layer.Delta.Dot(next_layer.Weight.T());
+                // next.Zk = Σj next.Wkj * Aj
+                // dC/dAi = Σk dC/d(next.Zk) * d(next.Zk)/dAi = Σk dC/d(next.Zk) * d(Σj next.Wkj * Aj)/dAi = Σk dC/d(next.Zk) * Wki
+                dC_dA2 = next_layer.dC_dZ2.Dot(next_layer.Weight.T());
             }
 
             // dC/dZ = dC/dA * dA/dZ
-            this.Delta = CostDerivative2 * Z2.Map(Sys.SigmoidPrime);
+            dC_dZ2 = dC_dA2 * Z2.Map(Sys.SigmoidPrime);
 
-            NablaB = new Array1(from c in Delta.Cols() select c.Sum());
-            NablaW = PrevLayer.GetActivation2().T().Dot( this.Delta );
+            NablaB = new Array1(from c in dC_dZ2.Cols() select c.Sum());
+            NablaW = PrevLayer.GetActivation2().T().Dot( dC_dZ2 );
 
             if (Sys.isDebug) {
 
-                NablaBiases = this.Delta;
+                NablaBiases = dC_dZ2;
                 // constructor(rows, cols, init, column_major, depth)
                 NablaWeights = new Array3(ParentNetwork.MiniBatchSize, Weight.nRow, Weight.nCol);
                 for (int batch_idx = 0; batch_idx < ParentNetwork.MiniBatchSize; batch_idx++) {
                     for (int r = 0; r < Weight.nRow; r++) {
                         for (int c = 0; c < Weight.nCol; c++) {
-                            NablaWeights[batch_idx, r, c] = PrevLayer.GetActivation2()[batch_idx, r] * this.Delta[batch_idx, c];
+                            NablaWeights[batch_idx, r, c] = PrevLayer.GetActivation2()[batch_idx, r] * dC_dZ2[batch_idx, c];
                         }
                     }
                 }
@@ -188,8 +181,8 @@ namespace MachineLearning {
         public Array4 Activation4;
 
         public Array4 svActivation4;
-        public Array4 svCostDerivative4;
-        public Array4 CostDerivative4;
+        public Array4 svdC_dA4;
+        public Array4 dC_dA4;
     }
 
     public class ConvolutionalLayer : Layer4 {
@@ -268,17 +261,17 @@ namespace MachineLearning {
             }
         }
 
-        public override void Backward(Array2 Y, double eta2) {
+        public override void Backward(Array2 Y) {
             PoolingLayer next_layer = NextLayer as PoolingLayer;
 
-            //this.Delta = NextLayer.Delta.Mul(SigmoidPrime(Z4));
-            Array4 deltaT = next_layer.Delta * Z4.Map(Sys.SigmoidPrime);
+            //dC_dZ4 = NextLayer.dC_dZ4.Mul(SigmoidPrime(Z4));
+            Array4 deltaT = next_layer.dC_dZ4 * Z4.Map(Sys.SigmoidPrime);
 
             Array3 prev_activation = PrevLayer.GetActivation3();
 
             NablaBiases = new Array2(ParentNetwork.MiniBatchSize, FilterCount);
             NablaWeight4 = new Array4(ParentNetwork.MiniBatchSize, FilterCount, FilterSize, FilterSize);
-            CostDerivative4 = new Array4(ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount);
+            dC_dA4 = new Array4(ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount);
 
             // すべてのフィルターに対し
             for (int filter_idx = 0; filter_idx < FilterCount; filter_idx++) {
@@ -295,7 +288,7 @@ namespace MachineLearning {
                         for (int c1 = 0; c1 < ImgCols; c1++) {
 
                             nabla_b += deltaT[batch_idx, r1, c1, filter_idx];
-                            CostDerivative4[batch_idx, r1, c1, filter_idx] = next_layer.Delta[batch_idx, r1, c1, filter_idx];
+                            dC_dA4[batch_idx, r1, c1, filter_idx] = next_layer.dC_dZ4[batch_idx, r1, c1, filter_idx];
                         }
                     }
 
@@ -374,7 +367,7 @@ namespace MachineLearning {
         public Array2 svActivation2;
         public int[,,,] MaxIdx;
         public bool RetainMaxIdx = false;
-        public Array4 Delta;
+        public Array4 dC_dZ4;
 
         public PoolingLayer(int filter_size) : base() {
             FilterSize = filter_size;
@@ -402,9 +395,11 @@ namespace MachineLearning {
 
         public override void Forward() {
             ConvolutionalLayer prev_Layer = PrevLayer as ConvolutionalLayer;
-            Activation4 = new Array4(ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount);
+            if (! RetainMaxIdx) {
 
-            MaxIdx = new int[ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount];
+                Activation4 = new Array4(ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount);
+                MaxIdx = new int[ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount];
+            }
 
             // バッチ内のデータに対し
             for (int batch_idx = 0; batch_idx < ParentNetwork.MiniBatchSize; batch_idx++) {
@@ -458,13 +453,13 @@ namespace MachineLearning {
             Activation2 = (Array2)Activation4.Reshape(ParentNetwork.MiniBatchSize, ImgRows * ImgCols * FilterCount);
         }
 
-        public override void Backward(Array2 Y, double eta2) {
+        public override void Backward(Array2 Y) {
             ConvolutionalLayer prev_Layer = PrevLayer as ConvolutionalLayer;
             FullyConnectedLayer next_layer = NextLayer as FullyConnectedLayer;
 
-            CostDerivative4 = (Array4)next_layer.Delta.Dot(next_layer.Weight.T()).Reshape(Activation4.Shape());
+            dC_dA4 = (Array4)next_layer.dC_dZ2.Dot(next_layer.Weight.T()).Reshape(Activation4.Shape());
 
-            Delta = new Array4(prev_Layer.Activation4.Shape());
+            dC_dZ4 = new Array4(prev_Layer.Activation4.Shape());
 
             // バッチ内のデータに対し
             for (int batch_idx = 0; batch_idx < ParentNetwork.MiniBatchSize; batch_idx++) {
@@ -483,7 +478,7 @@ namespace MachineLearning {
                             int r2 = max_idx / FilterSize;
                             int c2 = max_idx - r2 * FilterSize;
 
-                            Delta[batch_idx, r1 + r2, c1 + c2, filter_idx] = CostDerivative4[batch_idx, r1, c1,  filter_idx];
+                            dC_dZ4[batch_idx, r1 + r2, c1 + c2, filter_idx] = dC_dA4[batch_idx, r1, c1,  filter_idx];
                         }
                     }
                 }
@@ -572,12 +567,12 @@ namespace MachineLearning {
             double eta2 = eta / MiniBatchSize;
 
             for (int i = Layers.Length - 1; 1 <= i; i--) {
-                Layers[i].backward2(Y, eta2);
+                Layers[i].backward2(Y);
             }
 
             if (Sys.isDebug) {
 
-                Verify(X, Y, eta2);
+                Verify(X, Y);
             }
 
             foreach (Layer layer in Layers) {
