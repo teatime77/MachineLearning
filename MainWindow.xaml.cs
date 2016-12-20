@@ -946,6 +946,28 @@ namespace MachineLearning {
             }
         }
 
+        public static Array4 operator +(Array4 a, Array4 b) {
+            Debug.Assert(Enumerable.SequenceEqual(a.Shape(), b.Shape()), "Array-4 +");
+            int n0 = a.dt.GetLength(0);
+            int n1 = a.dt.GetLength(1);
+            int n2 = a.dt.GetLength(2);
+            int n3 = a.dt.GetLength(3);
+
+            Array4 m = new Array4(n0, n1, n2, n3);
+
+            for (int i = 0; i < n0; i++) {
+                for (int j = 0; j < n1; j++) {
+                    for (int k = 0; k < n2; k++) {
+                        for (int l = 0; l < n3; l++) {
+                            m.dt[i, j, k, l] = a.dt[i, j, k, l] + b.dt[i, j, k, l];
+                        }
+                    }
+                }
+            }
+
+            return m;
+        }
+
         public static Array4 operator *(Array4 a, Array4 b) {
             Debug.Assert(Enumerable.SequenceEqual(a.Shape(), b.Shape()), "Array-4 *");
             int n0 = a.dt.GetLength(0);
@@ -1034,6 +1056,28 @@ namespace MachineLearning {
             return a.Apply((x, y) => x - y, b);
         }
 
+        public override string ToString() {
+            StringWriter sw = new StringWriter();
+            int n0 = dt.GetLength(0);
+            int n1 = dt.GetLength(1);
+            int n2 = dt.GetLength(2);
+            int n3 = dt.GetLength(3);
+
+            for (int i = 0; i < n0; i++) {
+                for (int j = 0; j < n1; j++) {
+                    for (int k = 0; k < n2; k++) {
+                        for (int l = 0; l < n3; l++) {
+                            sw.Write(",{0}", dt[i, j, k, l]);
+                        }
+                        sw.Write(", ");
+                    }
+                    sw.WriteLine();
+                }
+                sw.WriteLine();
+            }
+
+            return sw.ToString();
+        }
     }
 }
 

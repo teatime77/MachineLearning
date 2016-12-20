@@ -32,20 +32,32 @@ struct Array2 : ArrayN {
 };
 
 struct Array3 : ArrayN {
-	int	Dims[3];
+	int nDepth;
+	int nRow;
+	int nCol;
+	int nRowCol;
+
+	__device__ __forceinline__ double At(int i, int j, int k){
+		return DevDt[i * nRowCol + j * nCol + k];
+	}
+
+	__device__ __forceinline__ void Set(int i, int j, int k, double d){
+		DevDt[i * nRowCol + j * nCol + k] = d;
+	}
 };
 
 struct Array4 : ArrayN {
-	int	Dims[4];
+	int Dims[4];
+	int Sizes[3];
+
+	__device__ __forceinline__ double At(int i, int j, int k, int l){
+		return DevDt[i * Sizes[0] + j * Sizes[1] + k * Sizes[2] + l];
+	}
+
+	__device__ __forceinline__ void Set(int i, int j, int k, int l, double d){
+		DevDt[i * Sizes[0] + j * Sizes[1] + k * Sizes[2] + l] = d;
+	}
 };
-
-__device__ __forceinline__ double At2(Array2 a, int i, int j){
-	return a.DevDt[ i * a.nCol + j ];
-}
-
-__device__ __forceinline__ void Set2(Array2 a, int i, int j, double d){
-	a.DevDt[i * a.nCol + j] = d;
-}
 
 __global__ void addKernel1(Array1 a, Array1 b, Array1 c){
     int i = threadIdx.x;
@@ -53,8 +65,27 @@ __global__ void addKernel1(Array1 a, Array1 b, Array1 c){
 }
 
 __global__ void addKernel2(Array2 a, Array2 b, Array2 c){
-	int i = threadIdx.y * a.nCol + threadIdx.x;
-	c.DevDt[i] = a.DevDt[i] + b.DevDt[i];
+	int i = threadIdx.y;
+	int j = threadIdx.x;
+
+	c.Set(i, j , a.At(i, j) + b.At(i, j));
+}
+
+__global__ void addKernel3(Array3 a, Array3 b, Array3 c){
+	int i = threadIdx.z;
+	int j = threadIdx.y;
+	int k = threadIdx.x;
+
+	c.Set(i, j, k, a.At(i, j, k) + b.At(i, j, k));
+}
+
+__global__ void addKernel4(Array4 a, Array4 b, Array4 c){
+	int i = blockIdx.x;
+	int j = threadIdx.z;
+	int k = threadIdx.y;
+	int l = threadIdx.x;
+
+	c.Set(i, j, k, l, a.At(i, j, k, l) + b.At(i, j, k, l));
 }
 
 __device__ double dotKernel(Array2 a, Array2 b, int i, int j){
@@ -151,31 +182,40 @@ Error:
     return (int)sts;
 }
 
-// Helper function for using CUDA to add vectors in parallel.
-extern "C" __declspec(dllexport) int CudaAdd2(Array2 a, Array2 b, Array2 c)
-{
-    cudaError_t sts;
-
+extern "C" __declspec(dllexport) int CudaAdd2(Array2 a, Array2 b, Array2 c){
 	chk( cudaDeviceSynchronize() );
 
-    // Launch a kernel on the GPU with one thread for each element.
 	dim3 threadsPerBlock(a.nCol, a.nRow);
     addKernel2<<<1, threadsPerBlock>>>(a, b, c);
 
-    // Check for any errors launching the kernel
-    sts = cudaGetLastError();
-    if (sts != cudaSuccess) {
-        fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(sts));
-        goto Error;
-    }
-    
-    // cudaDeviceSynchronize waits for the kernel to finish, and returns
-    // any errors encountered during the launch.
+    chk( cudaGetLastError() );
     chk( cudaDeviceSynchronize() );
-
-Error:
     
-    return (int)sts;
+	return (int)cudaSuccess;
+}
+
+extern "C" __declspec(dllexport) int CudaAdd3(Array3 a, Array3 b, Array3 c){
+	chk(cudaDeviceSynchronize());
+
+	dim3 threadsPerBlock(a.nCol, a.nRow, a.nDepth);
+	addKernel3<<<1, threadsPerBlock>>>(a, b, c);
+
+	chk(cudaGetLastError());
+	chk(cudaDeviceSynchronize());
+
+	return (int)cudaSuccess;
+}
+
+extern "C" __declspec(dllexport) int CudaAdd4(Array4 a, Array4 b, Array4 c){
+	chk(cudaDeviceSynchronize());
+
+	dim3 threadsPerBlock(a.Dims[3], a.Dims[2], a.Dims[1]);
+	addKernel4<<<a.Dims[0], threadsPerBlock>>>(a, b, c);
+
+	chk(cudaGetLastError());
+	chk(cudaDeviceSynchronize());
+
+	return (int)cudaSuccess;
 }
 
 extern "C" __declspec(dllexport) int CudaDotSigmoid(Array2 a, Array2 b, Array2 c, Array2 d)
