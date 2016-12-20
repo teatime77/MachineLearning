@@ -492,10 +492,22 @@ namespace MachineLearning {
         public double* DevDt;
         public int Length;
 
-        public Array1_(double* p, Array1 a) {
+        public Array1_(double* p, Array1 a, bool copy = true) {
             dt = p;
-            DevDt = null;
             Length = a.Length;
+
+            DevDt = Network.CudaAlloc(Length);
+            if (copy) {
+                Network.CudaToDev(DevDt, dt, Length);
+            }
+        }
+
+        public void ToHost() {
+            Network.CudaToHost(DevDt, dt, Length);
+        }
+
+        public void Free() {
+            Network.CudaFree(DevDt);
         }
     }
 
@@ -506,30 +518,57 @@ namespace MachineLearning {
         public int nRow;
         public int nCol;
 
-        public Array2_(double* p, Array2 a) {
+        public Array2_(double* p, Array2 a, bool copy = true) {
             dt = p;
-            DevDt = null;
             nRow = a.nRow;
             nCol = a.nCol;
             Length = nRow * nCol;
+
+            DevDt = Network.CudaAlloc(Length);
+            if (copy) {
+                Network.CudaToDev(DevDt, dt, Length);
+            }
+        }
+
+        public void ToHost() {
+            Network.CudaToHost(DevDt, dt, Length);
+        }
+
+        public void Free() {
+            Network.CudaFree(DevDt);
         }
     }
 
     public partial class Network {
         [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
-        unsafe private extern static int CUDASetDevice(int device);
+        unsafe public extern static int CudaSetDevice(int device);
 
         [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
-        unsafe private extern static int CUDADeviceReset();
+        unsafe public extern static int CudaDeviceReset();
 
         [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
-        unsafe private extern static int AddCuda1(Array1_ a, Array1_ b, Array1_ c);
+        unsafe public extern static double* CudaAlloc(int len);
 
         [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
-        unsafe private extern static int AddCuda2(Array2_ a, Array2_ b, Array2_ c);
+        unsafe public extern static int CudaFree(double* dev);
 
         [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
-        unsafe private extern static int CudaDotSigmoid(Array2_ a, Array2_ b, Array2_ c, Array2_ d);
+        unsafe public extern static int CudaToDev(double* dev, double* dt, int len);
+
+        [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
+        unsafe public extern static int CudaToHost(double* dev, double* dt, int len);
+
+        [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
+        unsafe public extern static int CudaSync();
+
+        [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
+        unsafe public extern static int CudaAdd1(Array1_ a, Array1_ b, Array1_ c);
+
+        [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
+        unsafe public extern static int CudaAdd2(Array2_ a, Array2_ b, Array2_ c);
+
+        [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
+        unsafe public extern static int CudaDotSigmoid(Array2_ a, Array2_ b, Array2_ c, Array2_ d);
 
         public int MiniBatchSize;
         public Layer[] Layers;
@@ -541,7 +580,7 @@ namespace MachineLearning {
 
         public static void TestCUDA() {
             unsafe{
-                CUDASetDevice(0);
+                CudaSetDevice(0);
 
                 {
                     Array1 a = new Array1(new double[] { 1, 2, 3, 4, 5 });
@@ -553,9 +592,15 @@ namespace MachineLearning {
                             fixed (double* cdev = c.dt) {
                                 Array1_ ma = new Array1_(adev, a);
                                 Array1_ mb = new Array1_(bdev, b);
-                                Array1_ mc = new Array1_(cdev, c);
+                                Array1_ mc = new Array1_(cdev, c, false);
 
-                                AddCuda1(ma, mb, mc);
+                                CudaAdd1(ma, mb, mc);
+
+                                mc.ToHost();
+                                CudaSync();
+                                ma.Free();
+                                mb.Free();
+                                mc.Free();
                             }
                         }
 
@@ -567,16 +612,18 @@ namespace MachineLearning {
                     Array2 b = new Array2(new double[,] { { 10, 20, 30 }, { 40, 50, 60 } });
                     Array2 c = new Array2(new double[a.nRow, a.nCol]);
 
-                    fixed (double* adev = a.dt) {
-                        fixed (double* bdev = b.dt) {
-                            fixed (double* cdev = c.dt) {
-                                Array2_ ma = new Array2_(adev, a);
-                                Array2_ mb = new Array2_(bdev, b);
-                                Array2_ mc = new Array2_(cdev, c);
+                    fixed (double* adev = a.dt, bdev = b.dt, cdev = c.dt) {
+                        Array2_ ma = new Array2_(adev, a);
+                        Array2_ mb = new Array2_(bdev, b);
+                        Array2_ mc = new Array2_(cdev, c, false);
 
-                                AddCuda2(ma, mb, mc);
-                            }
-                        }
+                        CudaAdd2(ma, mb, mc);
+
+                        mc.ToHost();
+                        CudaSync();
+                        ma.Free();
+                        mb.Free();
+                        mc.Free();
                     }
                     Debug.WriteLine("c:" + c.ToString());
                 }
@@ -586,19 +633,21 @@ namespace MachineLearning {
                     Array2 c = new Array2(new double[a.nRow, b.nCol]);
                     Array2 d = new Array2(new double[a.nRow, b.nCol]);
 
-                    fixed (double* adev = a.dt) {
-                        fixed (double* bdev = b.dt) {
-                            fixed (double* cdev = c.dt) {
-                                fixed (double* ddev = d.dt) {
-                                    Array2_ ma = new Array2_(adev, a);
-                                    Array2_ mb = new Array2_(bdev, b);
-                                    Array2_ mc = new Array2_(cdev, c);
-                                    Array2_ md = new Array2_(ddev, d);
+                    fixed (double* adev = a.dt, bdev = b.dt, cdev = c.dt, ddev = d.dt) {
+                        Array2_ ma = new Array2_(adev, a);
+                        Array2_ mb = new Array2_(bdev, b);
+                        Array2_ mc = new Array2_(cdev, c, false);
+                        Array2_ md = new Array2_(ddev, d, false);
 
-                                    CudaDotSigmoid(ma, mb, mc, md);
-                                }
-                            }
-                        }
+                        CudaDotSigmoid(ma, mb, mc, md);
+
+                        mc.ToHost();
+                        md.ToHost();
+                        CudaSync();
+                        ma.Free();
+                        mb.Free();
+                        mc.Free();
+                        md.Free();
                     }
                     Debug.WriteLine("c  :" + c.ToString());
                     Debug.WriteLine("a.b:" + a.Dot(b).ToString());
@@ -607,7 +656,7 @@ namespace MachineLearning {
                 }
 
 
-                CUDADeviceReset();
+                CudaDeviceReset();
             }
         }
 
