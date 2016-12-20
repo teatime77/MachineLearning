@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace MachineLearning {
     public class Layer {
@@ -486,8 +487,22 @@ namespace MachineLearning {
         }
     }
 
+    unsafe public struct Array1_ {
+        public double* dt;
+        public double* DevDt;
+        public int Length;
+
+        public Array1_(double* p, int len) {
+            dt = p;
+            DevDt = null;
+            Length = len;
+        }
+    }
 
     public partial class Network {
+        [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
+        unsafe private extern static int CUDAmain(Array1_ a, Array1_ b, Array1_ c);
+
         public int MiniBatchSize;
         public Layer[] Layers;
 
@@ -496,7 +511,37 @@ namespace MachineLearning {
         public byte[,] TestImage;
         public byte[] TestLabel;
 
+        void TestCUDA() {
+            Array1 a = new Array1( new double[] { 1, 2, 3, 4, 5 } );
+            Array1 b = new Array1( new double[] { 10, 20, 30, 40, 50 } );
+            Array1 c = new Array1( new double[a.Length] );
+            unsafe
+            {
+
+                fixed (double* adev = a.dt) {
+                    fixed (double* bdev = b.dt) {
+                        fixed (double* cdev = c.dt) {
+                            Array1_ ma = new Array1_(adev, a.Length);
+                            Array1_ mb = new Array1_(bdev, b.Length);
+                            Array1_ mc = new Array1_(cdev, c.Length);
+
+                            CUDAmain(ma, mb, mc);
+                        }
+                    }
+
+                }
+                //Class1 C = new Class1();
+            }
+            foreach (double x in c.dt) {
+                Debug.Write(" " + x);
+
+            }
+            Debug.WriteLine("");
+        }
+
         public Network(Layer[] layers) {
+            TestCUDA();
+
             Layers = layers;
 
             Layer prev_layer = null;

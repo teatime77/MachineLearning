@@ -39,7 +39,7 @@ namespace MachineLearning {
 
         private void Window_Loaded(object sender, RoutedEventArgs e) {
             TestIsLetter();
-            Sys.TestRandomSampling();
+            //Sys.TestRandomSampling();
 
             string path = Assembly.GetExecutingAssembly().Location;
             for(int i = 0; i < 3; i++) {
