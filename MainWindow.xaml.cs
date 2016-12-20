@@ -35,6 +35,7 @@ namespace MachineLearning {
 
         public MainWindow() {
             InitializeComponent();
+            Network.TestCUDA();
         }
 
         private void Window_Loaded(object sender, RoutedEventArgs e) {
@@ -512,6 +513,17 @@ namespace MachineLearning {
             }
 
             return max_idx;
+        }
+
+        public override string ToString() {
+            StringWriter sw = new StringWriter();
+
+            for (int i = 0; i < Length; i++) {
+                sw.Write("\t{0}", dt[i]);
+            }
+            sw.WriteLine();
+
+            return sw.ToString();
         }
     }
 

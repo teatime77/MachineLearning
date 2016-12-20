@@ -492,16 +492,44 @@ namespace MachineLearning {
         public double* DevDt;
         public int Length;
 
-        public Array1_(double* p, int len) {
+        public Array1_(double* p, Array1 a) {
             dt = p;
             DevDt = null;
-            Length = len;
+            Length = a.Length;
+        }
+    }
+
+    unsafe public struct Array2_ {
+        public double* dt;
+        public double* DevDt;
+        public int Length;
+        public int nRow;
+        public int nCol;
+
+        public Array2_(double* p, Array2 a) {
+            dt = p;
+            DevDt = null;
+            nRow = a.nRow;
+            nCol = a.nCol;
+            Length = nRow * nCol;
         }
     }
 
     public partial class Network {
         [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
-        unsafe private extern static int CUDAmain(Array1_ a, Array1_ b, Array1_ c);
+        unsafe private extern static int CUDASetDevice(int device);
+
+        [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
+        unsafe private extern static int CUDADeviceReset();
+
+        [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
+        unsafe private extern static int AddCuda1(Array1_ a, Array1_ b, Array1_ c);
+
+        [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
+        unsafe private extern static int AddCuda2(Array2_ a, Array2_ b, Array2_ c);
+
+        [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
+        unsafe private extern static int CudaDotSigmoid(Array2_ a, Array2_ b, Array2_ c, Array2_ d);
 
         public int MiniBatchSize;
         public Layer[] Layers;
@@ -511,37 +539,79 @@ namespace MachineLearning {
         public byte[,] TestImage;
         public byte[] TestLabel;
 
-        void TestCUDA() {
-            Array1 a = new Array1( new double[] { 1, 2, 3, 4, 5 } );
-            Array1 b = new Array1( new double[] { 10, 20, 30, 40, 50 } );
-            Array1 c = new Array1( new double[a.Length] );
-            unsafe
-            {
+        public static void TestCUDA() {
+            unsafe{
+                CUDASetDevice(0);
 
-                fixed (double* adev = a.dt) {
-                    fixed (double* bdev = b.dt) {
-                        fixed (double* cdev = c.dt) {
-                            Array1_ ma = new Array1_(adev, a.Length);
-                            Array1_ mb = new Array1_(bdev, b.Length);
-                            Array1_ mc = new Array1_(cdev, c.Length);
+                {
+                    Array1 a = new Array1(new double[] { 1, 2, 3, 4, 5 });
+                    Array1 b = new Array1(new double[] { 10, 20, 30, 40, 50 });
+                    Array1 c = new Array1(new double[a.Length]);
 
-                            CUDAmain(ma, mb, mc);
+                    fixed (double* adev = a.dt) {
+                        fixed (double* bdev = b.dt) {
+                            fixed (double* cdev = c.dt) {
+                                Array1_ ma = new Array1_(adev, a);
+                                Array1_ mb = new Array1_(bdev, b);
+                                Array1_ mc = new Array1_(cdev, c);
+
+                                AddCuda1(ma, mb, mc);
+                            }
+                        }
+
+                    }
+                    Debug.WriteLine("c:" + c.ToString());
+                }
+                {
+                    Array2 a = new Array2(new double[,] { { 1, 2, 3 }, { 4, 5, 6 } });
+                    Array2 b = new Array2(new double[,] { { 10, 20, 30 }, { 40, 50, 60 } });
+                    Array2 c = new Array2(new double[a.nRow, a.nCol]);
+
+                    fixed (double* adev = a.dt) {
+                        fixed (double* bdev = b.dt) {
+                            fixed (double* cdev = c.dt) {
+                                Array2_ ma = new Array2_(adev, a);
+                                Array2_ mb = new Array2_(bdev, b);
+                                Array2_ mc = new Array2_(cdev, c);
+
+                                AddCuda2(ma, mb, mc);
+                            }
                         }
                     }
-
+                    Debug.WriteLine("c:" + c.ToString());
                 }
-                //Class1 C = new Class1();
-            }
-            foreach (double x in c.dt) {
-                Debug.Write(" " + x);
+                {
+                    Array2 a = new Array2(new double[,] { { 0.1, 0.2 }, { 0.3, 0.4 }, { 0.5, 0.6 } });
+                    Array2 b = new Array2(new double[,] { { 0.11, 0.22, 0.33 }, { 0.44, 0.55, 0.66 } });
+                    Array2 c = new Array2(new double[a.nRow, b.nCol]);
+                    Array2 d = new Array2(new double[a.nRow, b.nCol]);
 
+                    fixed (double* adev = a.dt) {
+                        fixed (double* bdev = b.dt) {
+                            fixed (double* cdev = c.dt) {
+                                fixed (double* ddev = d.dt) {
+                                    Array2_ ma = new Array2_(adev, a);
+                                    Array2_ mb = new Array2_(bdev, b);
+                                    Array2_ mc = new Array2_(cdev, c);
+                                    Array2_ md = new Array2_(ddev, d);
+
+                                    CudaDotSigmoid(ma, mb, mc, md);
+                                }
+                            }
+                        }
+                    }
+                    Debug.WriteLine("c  :" + c.ToString());
+                    Debug.WriteLine("a.b:" + a.Dot(b).ToString());
+                    Debug.WriteLine("d  :" + d.ToString());
+                    Debug.WriteLine("Sigmoid(a.b):" + a.Dot(b).Map(Sys.Sigmoid).ToString());
+                }
+
+
+                CUDADeviceReset();
             }
-            Debug.WriteLine("");
         }
 
         public Network(Layer[] layers) {
-            TestCUDA();
-
             Layers = layers;
 
             Layer prev_layer = null;
