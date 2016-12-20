@@ -5,10 +5,6 @@
 #include <stdio.h>
 
 struct ArrayN {
-
-};
-
-struct Array1 : ArrayN {
 	double* dt;
 	double* DevDt;
 	int Length;
@@ -26,6 +22,10 @@ struct Array1 : ArrayN {
 	}
 
 	void ToDev(){
+		if (DevDt == NULL){
+			Alloc();
+		}
+
 		cudaError_t cudaStatus = cudaMemcpy(DevDt, dt, Length * sizeof(double), cudaMemcpyHostToDevice);
 		if (cudaStatus != cudaSuccess) {
 			fprintf(stderr, "cudaMalloc failed!");
@@ -42,6 +42,14 @@ struct Array1 : ArrayN {
 	}
 };
 
+struct Array1 : ArrayN {
+};
+
+struct Array2 : ArrayN {
+	int nRow;
+	int nCol;
+};
+
 __global__ void addKernel(Array1 c, const Array1 a, const Array1 b)
 {
     int i = threadIdx.x;
@@ -49,30 +57,41 @@ __global__ void addKernel(Array1 c, const Array1 a, const Array1 b)
 }
 
 
+extern "C" __declspec(dllexport) int CUDASetDevice(int device){
+	// Choose which GPU to run on, change this on a multi-GPU system.
+	cudaError_t cudaStatus = cudaSetDevice(device);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
+		return -1;
+	}
+
+	return (int)cudaSuccess;
+}
+
+extern "C" __declspec(dllexport) int CUDADeviceReset(){
+	// cudaDeviceReset must be called before exiting in order for profiling and
+	// tracing tools such as Nsight and Visual Profiler to show complete traces.
+	cudaError_t cudaStatus = cudaDeviceReset();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaDeviceReset failed!");
+		return -1;
+	}
+
+	return (int)cudaSuccess;
+}
+
 // Helper function for using CUDA to add vectors in parallel.
-cudaError_t addWithCuda(Array1 c, Array1 a, Array1 b, unsigned int size)
+extern "C" __declspec(dllexport) int addWithCuda(Array1 a, Array1 b, Array1 c)
 {
     cudaError_t cudaStatus;
 
-    // Choose which GPU to run on, change this on a multi-GPU system.
-    cudaStatus = cudaSetDevice(0);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
-        goto Error;
-    }
-
-	// Allocate GPU buffers for three vectors (two input, one output)    .
-	c.Alloc();
-	a.Alloc();
-	b.Alloc();
-
-	// Copy input vectors from host memory to GPU buffers.
 	a.ToDev();
 	b.ToDev();
-	
+	c.Alloc();
+	cudaDeviceSynchronize();
 
     // Launch a kernel on the GPU with one thread for each element.
-    addKernel<<<1, size>>>(c, a, b);
+    addKernel<<<1, c.Length>>>(c, a, b);
 
     // Check for any errors launching the kernel
     cudaStatus = cudaGetLastError();
@@ -91,39 +110,12 @@ cudaError_t addWithCuda(Array1 c, Array1 a, Array1 b, unsigned int size)
 
     // Copy output vector from GPU buffer to host memory.
 	c.ToHost();
+	cudaDeviceSynchronize();
 
 Error:
 	c.Free();
 	a.Free();
 	b.Free();
     
-    return cudaStatus;
-}
-
-extern "C" __declspec(dllexport) int CUDAmain(Array1 a, Array1 b, Array1 c)
-{
-	const int arraySize = 5;
-	//const double a[arraySize] = { 1, 2, 3, 4, 5 };
-	//const double b[arraySize] = { 10, 20, 30, 40, 50 };
-	//double c[arraySize] = { 0 };
-
-	// Add vectors in parallel.
-	cudaError_t cudaStatus = addWithCuda(c, a, b, arraySize);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "addWithCuda failed!");
-		return 1;
-	}
-
-	//printf("{1,2,3,4,5} + {10,20,30,40,50} = {%f,%f,%f,%f,%f}\n",
-	//    c[0], c[1], c[2], c[3], c[4]);
-
-	// cudaDeviceReset must be called before exiting in order for profiling and
-	// tracing tools such as Nsight and Visual Profiler to show complete traces.
-	cudaStatus = cudaDeviceReset();
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaDeviceReset failed!");
-		return 1;
-	}
-
-	return 0;
+    return (int)cudaStatus;
 }
