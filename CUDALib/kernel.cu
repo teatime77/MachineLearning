@@ -8,6 +8,7 @@
 
 void Log(wchar_t *szFormat, ...);
 void LogA(char *szFormat, ...);
+void Assert(bool ok, wchar_t* msg);
 
 struct ArrayN {
 	double* dt;
@@ -221,20 +222,55 @@ extern "C" __declspec(dllexport) int CudaDotSigmoid(Array2 a, Array2 b, Array2 c
 	Activation2 = Z2.Map(Sys.Sigmoid);
 */
 __global__ void FullForwardKernel(Array2 prev_A2, Array2 Weight, Array1 Bias, Array2 z2, Array2 a2){
-	int i = threadIdx.y;
-	int j = threadIdx.x;
+	int r = blockIdx.y * blockDim.y + threadIdx.y;
+	int c = blockIdx.x * blockDim.x + threadIdx.x;
+	if (z2.nRow <= r || z2.nCol <= c){
+		return;
+	}
 
-	double sum = dotKernel(prev_A2, Weight, i, j) + Bias.DevDt[j];
+	double sum = dotKernel(prev_A2, Weight, r, c) + Bias.DevDt[c];
 
-	z2.Set(i, j, sum);
-	a2.Set(i, j, Sigmoid(sum));
+	z2.Set(r, c, sum);
+	a2.Set(r, c, Sigmoid(sum));
 }
 
 extern "C" __declspec(dllexport) int FullForward(Array2 prev_A2, Array2 Weight, Array1 Bias, Array2 z2, Array2 a2){
 	chk( cudaDeviceSynchronize() );
 
-	dim3 threadsPerBlock(z2.nCol, z2.nRow);
-	FullForwardKernel<<<1, threadsPerBlock>>>(prev_A2, Weight, Bias, z2, a2);
+	dim3 threadsPerBlock;
+	dim3 blocksPerGrid;
+
+	if (z2.nCol * z2.nRow <= 1024){
+
+		threadsPerBlock = dim3(z2.nCol, z2.nRow);
+		blocksPerGrid = dim3(1, 1);
+	}
+	else{
+		int col1, col2, row1, row2;
+
+		if (1024 < z2.nCol){
+
+			int col1 = 1024;
+			int col2 = z2.nCol / col1;
+			col2 += (col1 * col2 < z2.nCol ? 1 : 0);
+		}
+		else{
+
+			col1 = z2.nCol;
+			col2 = 1;
+		}
+		row1 = min(z2.nRow, 1024 / col1);
+		row2 = z2.nRow / row1;
+		row2 += (row1 * row2 < z2.nRow ? 1 : 0);
+
+		threadsPerBlock = dim3(col1, row1);
+		blocksPerGrid = dim3(col2, row2);
+
+		Assert(col1 * row1 < 1024, L"Full-Forward");
+		Assert(z2.nCol <= col1 * col2 && z2.nRow <= row1 * row2, L"Full-Forward");
+	}
+
+	FullForwardKernel<<<blocksPerGrid, threadsPerBlock>>>(prev_A2, Weight, Bias, z2, a2);
 
 	chk(cudaGetLastError());
 	chk( cudaDeviceSynchronize() );

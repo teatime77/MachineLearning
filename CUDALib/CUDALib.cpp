@@ -58,3 +58,10 @@ void LogA(char *szFormat, ...){
 
 	OutputDebugString(buf);
 }
+
+void Assert(bool ok, wchar_t* msg){
+	if (!ok){
+
+		Log(msg);
+	}
+}

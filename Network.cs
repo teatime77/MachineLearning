@@ -126,30 +126,22 @@ namespace MachineLearning {
             return Activation2;
         }
 
-        double span = 0;
-        double Cnt = 0;
+        static Dictionary<string, double> SpanC = new Dictionary<string, double>();
+        static Dictionary<string, double> SpanG = new Dictionary<string, double>();
+        static Dictionary<string, int> CntC = new Dictionary<string, int>();
+        static Dictionary<string, int> CntG = new Dictionary<string, int>();
 
         public override void Forward() {
             Array2 prev_A2 = PrevLayer.GetActivation2();
-            Array2 z2_sv = null;
-            Array2 a_sv = null;
 
-            DateTime start = DateTime.Now;
-            if (Sys.CPU || 1024 < prev_A2.nRow * Weight.nCol){
+            if (Sys.CPU){
 
                 Z2 = prev_A2.Dot(Weight) + Bias;
                 Activation2 = Z2.Map(Sys.Sigmoid);
             }
             else{
 
-                if (Sys.isDebug) {
-
-                    Z2 = prev_A2.Dot(Weight) + Bias;
-                    Activation2 = Z2.Map(Sys.Sigmoid);
-
-                    z2_sv = Z2.Clone();
-                    a_sv = Activation2.Clone();
-                }
+                DateTime start = DateTime.Now;
 
                 Z2 = new Array2(prev_A2.nRow, Weight.nCol);
                 Activation2 = new Array2(prev_A2.nRow, Weight.nCol);
@@ -175,21 +167,36 @@ namespace MachineLearning {
                     }
                 }
 
-                if (Sys.isDebug) {
+                string key = string.Format("{0}x{1}", Z2.nRow, Z2.nCol);
+                if (!SpanG.ContainsKey(key)) {
+                    SpanG.Add(key, 0);
+                    SpanC.Add(key, 0);
+                    CntG.Add(key, 0);
+                    CntC.Add(key, 0);
+                }
+                SpanG[key] += (DateTime.Now - start).TotalMilliseconds;
+                CntG[key]++;
+
+                if (Sys.GPUDebug) {
+
+                    Array2 z2_sv = null;
+                    Array2 a_sv = null;
+
+                    start = DateTime.Now;
+
+                    z2_sv = prev_A2.Dot(Weight) + Bias;
+                    a_sv = z2_sv.Map(Sys.Sigmoid);
+
+                    SpanC[key] += (DateTime.Now - start).TotalMilliseconds;
+                    CntC[key]++;
 
                     double dz = (Z2 - z2_sv).Map(Math.Abs).Max();
                     double da = (Activation2 - a_sv).Map(Math.Abs).Max();
                     Debug.Assert(Math.Max(dz, da) < 0.000000001, "forward");
-                }
-            }
 
-            if (prev_A2.nRow * Weight.nCol <= 1024) {
-
-                span += (DateTime.Now - start).TotalMilliseconds;
-                Cnt++;
-
-                if (Cnt % 1000 == 0) {
-                    Debug.WriteLine("time {0}", span / Cnt);
+                    if (CntG[key] % 1000 == 0 || 1000 < Z2.nRow * Z2.nCol) {
+                        Debug.WriteLine("time {0}x{1} GPU:{2} CPU:{3}", Z2.nRow, Z2.nCol, SpanG[key] / CntG[key], SpanC[key] / CntC[key]);
+                    }
                 }
             }
         }
@@ -939,8 +946,8 @@ namespace MachineLearning {
 
             Array2 result = LastLayer.GetActivation2();
 
-            Debug.WriteLine("テスト --------------------------------------------------------------------------------");
-            Debug.WriteLine(result.ToString());
+            //Debug.WriteLine("テスト --------------------------------------------------------------------------------");
+            //Debug.WriteLine(result.ToString());
 
             return (from r in Enumerable.Range(0, result.nRow) select result.Row(r).ArgMax() == TestLabel[r] ? 1 : 0).Sum();
         }
@@ -990,8 +997,9 @@ namespace MachineLearning {
         public static bool DebugOut = true;
 
         public static bool isDebug = false;
+        public static bool GPUDebug = true;
         public static bool isCNN = false;
-        public static bool CPU = true;
+        public static bool CPU = false;
 
         public static double Sigmoid(double z){
             return 1.0 / (1.0 + Math.Exp(-z));
