@@ -289,13 +289,7 @@ namespace MachineLearning {
             Weight3 = (new Array3(FilterCount, FilterSize, FilterSize)).Set(TNormalRandom.NormalRandom.NextDouble); 
         }
 
-        public override void Forward() {
-            if (Z4 == null || !Enumerable.SequenceEqual(Z4.Shape(), new int[] { ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount }) ) {
-
-                Z4 = new Array4(ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount);
-                Activation4 = new Array4(ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount);
-            }
-
+        public void ForwardCPU() {
             Array3 prev_activation = PrevLayer.GetActivation3();
 
             // バッチ内のデータに対し
@@ -330,6 +324,91 @@ namespace MachineLearning {
                     }
                 }
             }
+        }
+
+        public void ForwardGPU() {
+            Array3 prev_A3 = PrevLayer.GetActivation3();
+
+            unsafe{
+                fixed (double* prev_A3_dev = prev_A3.dt, Weight3_dev = Weight3.dt, Bias_dev = Bias.dt, z4_dev = Z4.dt, a4_dev = Activation4.dt) {
+                    Array3_ prev_A3_ = new Array3_(prev_A3_dev, prev_A3);
+                    Array3_ Weight3_ = new Array3_(Weight3_dev, Weight3);
+                    Array1_ Bias_ = new Array1_(Bias_dev, Bias);
+                    Array4_ z4_ = new Array4_(z4_dev, Z4, false);
+                    Array4_ a4_ = new Array4_(a4_dev, Activation4, false);
+
+                    Sys.ConvolutionForward(prev_A3_, Weight3_, Bias_, z4_, a4_);
+
+                    z4_.ToHost();
+                    a4_.ToHost();
+                    Sys.CudaSync();
+                    prev_A3_.Free();
+                    Weight3_.Free();
+                    Bias_.Free();
+                    z4_.Free();
+                    a4_.Free();
+                }
+            }
+        }
+
+        static Dictionary<string, double> SpanC = new Dictionary<string, double>();
+        static Dictionary<string, double> SpanG = new Dictionary<string, double>();
+        static Dictionary<string, int> CntC = new Dictionary<string, int>();
+        static Dictionary<string, int> CntG = new Dictionary<string, int>();
+
+        public override void Forward() {
+            Array3 prev_activation = PrevLayer.GetActivation3();
+
+            if (Z4 == null || !Enumerable.SequenceEqual(Z4.Shape(), new int[] { ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount })) {
+
+                Z4 = new Array4(ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount);
+                Activation4 = new Array4(ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount);
+            }
+
+
+            if (Sys.CPU) {
+
+                ForwardCPU();
+            }
+            else {
+
+                string key = string.Format("{0}", prev_activation.nDepth);
+                if (!SpanG.ContainsKey(key)) {
+                    SpanG.Add(key, 0);
+                    SpanC.Add(key, 0);
+                    CntG.Add(key, 0);
+                    CntC.Add(key, 0);
+                }
+
+                DateTime start = DateTime.Now;
+
+                ForwardGPU();
+
+                SpanG[key] += (DateTime.Now - start).TotalMilliseconds;
+                CntG[key]++;
+
+                if (Sys.GPUDebug) {
+
+                    Array4 z4_sv = Z4.Clone();
+                    Array4 a4_sv = Activation4.Clone();
+
+                    start = DateTime.Now;
+
+                    ForwardCPU();
+
+                    SpanC[key] += (DateTime.Now - start).TotalMilliseconds;
+                    CntC[key]++;
+
+                    double dz = (Z4 - z4_sv).Map(Math.Abs).Max();
+                    double da = (Activation4 - a4_sv).Map(Math.Abs).Max();
+                    Debug.Assert(Math.Max(dz, da) < 0.000000001, "conv-forward");
+
+                    if (CntG[key] % 100 == 0 || 100 < prev_activation.nDepth) {
+                        Debug.WriteLine("time {0} GPU:{1} CPU:{2}", key, SpanG[key] / CntG[key], SpanC[key] / CntC[key]);
+                    }
+                }
+            }
+
         }
 
         public override void Backward(Array2 Y) {
@@ -993,12 +1072,15 @@ namespace MachineLearning {
         [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
         unsafe public extern static int FullForward(Array2_ prev_A2_, Array2_ Weight_, Array1_ Bias_, Array2_ z2_, Array2_ a2_);
 
+        [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
+        unsafe public extern static int ConvolutionForward(Array3_ prev_A3, Array3_ weight3, Array1_ bias, Array4_ z4, Array4_ a4);
+
         public static bool isFloat64 = true;// isDebug;
         public static bool DebugOut = true;
 
         public static bool isDebug = false;
         public static bool GPUDebug = true;
-        public static bool isCNN = false;
+        public static bool isCNN = true;
         public static bool CPU = false;
 
         public static double Sigmoid(double z){

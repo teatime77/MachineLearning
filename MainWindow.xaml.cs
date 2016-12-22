@@ -52,8 +52,7 @@ namespace MachineLearning {
 
                 theNetwork = new Network(new Layer[] {
                     new InputLayer(28, 28),
-                    //new ConvolutionalLayer(5, 20),
-                    new ConvolutionalLayer(10, 2),
+                    new ConvolutionalLayer(5, 20),
                     new PoolingLayer(2),
                     new FullyConnectedLayer(30),
                     new FullyConnectedLayer(10)

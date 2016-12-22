@@ -217,6 +217,8 @@ extern "C" __declspec(dllexport) int CudaDotSigmoid(Array2 a, Array2 b, Array2 c
 	return 0;
 }
 
+//-------------------------------------------------- 全結合レイヤー
+
 /*
 	Z2 = prev_A2.Dot(Weight) + Bias;
 	Activation2 = Z2.Map(Sys.Sigmoid);
@@ -274,6 +276,133 @@ extern "C" __declspec(dllexport) int FullForward(Array2 prev_A2, Array2 Weight, 
 
 	chk(cudaGetLastError());
 	chk( cudaDeviceSynchronize() );
+
+	return 0;
+}
+
+//-------------------------------------------------- 畳み込みレイヤー
+
+/*
+Z2 = prev_A2.Dot(Weight) + Bias;
+Activation2 = Z2.Map(Sys.Sigmoid);
+*/
+__global__ void ConvolutionForwardKernel(Array3 prev_A3, Array3 weight3, Array1 bias, Array4 z4, Array4 a4){
+	int batch_idx = blockIdx.z * blockDim.z + threadIdx.z;
+	int r1		  = blockIdx.y * blockDim.y + threadIdx.y;
+	int c1		  = blockIdx.x * blockDim.x + threadIdx.x;
+	if (z4.Dims[0] <= batch_idx || z4.Dims[1] <= r1 || z4.Dims[2] <= c1){
+		return;
+	}
+
+	int filter_count = weight3.nDepth;
+	int filter_size  = weight3.nRow;
+
+	double A[5][5];
+	__shared__ double W[20][5][5];
+	__shared__ double B[20];
+
+	if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0){
+
+		for (int filter_idx = 0; filter_idx < filter_count; filter_idx++) {
+
+			B[filter_idx] = bias.DevDt[filter_idx];
+
+			// フィルターの行に対し
+			for (int r2 = 0; r2 < filter_size; r2++) {
+
+				// フィルターの列に対し
+				for (int c2 = 0; c2 < filter_size; c2++) {
+
+					W[filter_idx][r2][c2] = weight3.At(filter_idx, r2, c2);
+				}
+			}
+		}
+	}
+
+	__syncthreads();
+
+	// フィルターの行に対し
+	for (int r2 = 0; r2 < filter_size; r2++) {
+
+		// フィルターの列に対し
+		for (int c2 = 0; c2 < filter_size; c2++) {
+
+			A[r2][c2] = prev_A3.At(batch_idx, r1 + r2, c1 + c2);
+		}
+	}
+
+
+	// すべてのフィルターに対し
+	for (int filter_idx = 0; filter_idx < filter_count; filter_idx++) {
+
+		double sum = 0.0;
+
+		// フィルターの行に対し
+		for (int r2 = 0; r2 < filter_size; r2++) {
+
+			// フィルターの列に対し
+			for (int c2 = 0; c2 < filter_size; c2++) {
+				//sum += prev_A3.At(batch_idx, r1 + r2, c1 + c2) * weight3.At(filter_idx, r2, c2);
+				sum += A[r2][c2] * W[filter_idx][r2][c2];
+			}
+		}
+
+		// 出力
+		//double z_val = sum + bias.DevDt[filter_idx];
+		double z_val = sum + B[filter_idx];
+
+		z4.Set(batch_idx, r1, c1, filter_idx, z_val);
+		a4.Set(batch_idx, r1, c1, filter_idx, Sigmoid(z_val));
+	}
+}
+
+extern "C" __declspec(dllexport) int ConvolutionForward(Array3 prev_A3, Array3 weight3, Array1 bias, Array4 z4, Array4 a4){
+	chk(cudaDeviceSynchronize());
+
+	dim3 threadsPerBlock;
+	dim3 blocksPerGrid;
+
+	int mini_batch_size = z4.Dims[0];
+	int img_rows = z4.Dims[1];
+	int img_cols = z4.Dims[2];
+	int filter_count = weight3.nDepth;
+	int filter_size = weight3.nRow;
+
+	Assert(weight3.nRow == weight3.nCol, L"");
+	Assert(filter_count * filter_size * filter_size < 1024, L"");
+
+	int col1, col2, row1, row2, depth1, depth2;
+
+	if (1024 < img_cols){
+
+		int col1 = 1024;
+		int col2 = img_cols / col1;
+		col2 += (col1 * col2 < img_cols ? 1 : 0);
+	}
+	else{
+
+		col1 = img_cols;
+		col2 = 1;
+	}
+
+	row1 = min(img_rows, 1024 / col1);
+	row2 = img_rows / row1;
+	row2 += (row1 * row2 < img_rows ? 1 : 0);
+
+	depth1 = min(mini_batch_size, 1024 / (row1 * col1));
+	depth2 = mini_batch_size / depth1;
+	depth2 += (depth1 * depth2 < mini_batch_size ? 1 : 0);
+
+	Assert(depth1 * row1 * col1 < 1024, L"Conv-Forward");
+	Assert(mini_batch_size <= depth1 * depth2 && img_rows <= row1 * row2 && img_cols <= col1 * col2, L"Conv-Forward");
+
+	threadsPerBlock = dim3(col1, row1, depth1);
+	blocksPerGrid = dim3(col2, row2, depth2);
+
+	ConvolutionForwardKernel<<<blocksPerGrid, threadsPerBlock>>>(prev_A3, weight3, bias, z4, a4);
+
+	chk(cudaGetLastError());
+	chk(cudaDeviceSynchronize());
 
 	return 0;
 }
