@@ -126,9 +126,72 @@ namespace MachineLearning {
             return Activation2;
         }
 
+        double span = 0;
+        double Cnt = 0;
+
         public override void Forward() {
-            Z2 = PrevLayer.GetActivation2().Dot(Weight) + Bias;
-            Activation2 = Z2.Map(Sys.Sigmoid);
+            Array2 prev_A2 = PrevLayer.GetActivation2();
+            Array2 z2_sv = null;
+            Array2 a_sv = null;
+
+            DateTime start = DateTime.Now;
+            if (Sys.CPU || 1024 < prev_A2.nRow * Weight.nCol){
+
+                Z2 = prev_A2.Dot(Weight) + Bias;
+                Activation2 = Z2.Map(Sys.Sigmoid);
+            }
+            else{
+
+                if (Sys.isDebug) {
+
+                    Z2 = prev_A2.Dot(Weight) + Bias;
+                    Activation2 = Z2.Map(Sys.Sigmoid);
+
+                    z2_sv = Z2.Clone();
+                    a_sv = Activation2.Clone();
+                }
+
+                Z2 = new Array2(prev_A2.nRow, Weight.nCol);
+                Activation2 = new Array2(prev_A2.nRow, Weight.nCol);
+                unsafe
+                {
+                    fixed (double* prev_A2_dev = prev_A2.dt, Weight_dev = Weight.dt, Bias_dev = Bias.dt, z2_dev = Z2.dt, a2_dev = Activation2.dt) {
+                        Array2_ prev_A2_ = new Array2_(prev_A2_dev, prev_A2);
+                        Array2_ Weight_ = new Array2_(Weight_dev, Weight);
+                        Array1_ Bias_ = new Array1_(Bias_dev, Bias);
+                        Array2_ z2_ = new Array2_(z2_dev, Z2, false);
+                        Array2_ a2_ = new Array2_(a2_dev, Activation2, false);
+
+                        Sys.FullForward(prev_A2_, Weight_, Bias_, z2_, a2_);
+
+                        z2_.ToHost();
+                        a2_.ToHost();
+                        Sys.CudaSync();
+                        prev_A2_.Free();
+                        Weight_.Free();
+                        Bias_.Free();
+                        z2_.Free();
+                        a2_.Free();
+                    }
+                }
+
+                if (Sys.isDebug) {
+
+                    double dz = (Z2 - z2_sv).Map(Math.Abs).Max();
+                    double da = (Activation2 - a_sv).Map(Math.Abs).Max();
+                    Debug.Assert(Math.Max(dz, da) < 0.000000001, "forward");
+                }
+            }
+
+            if (prev_A2.nRow * Weight.nCol <= 1024) {
+
+                span += (DateTime.Now - start).TotalMilliseconds;
+                Cnt++;
+
+                if (Cnt % 1000 == 0) {
+                    Debug.WriteLine("time {0}", span / Cnt);
+                }
+            }
         }
 
         public override void Backward(Array2 Y) {
@@ -759,8 +822,7 @@ namespace MachineLearning {
                     Debug.WriteLine("Sigmoid(a.b):" + a.Dot(b).Map(Sys.Sigmoid).ToString());
                 }
 
-
-                Sys.CudaDeviceReset();
+//                Sys.CudaDeviceReset();
             }
         }
 
@@ -784,6 +846,8 @@ namespace MachineLearning {
         }
 
         public void SGD(int epochs, int mini_batch_size, double eta) {
+            Network.TestCUDA();
+
             MiniBatchSize = mini_batch_size;
 
             int train_cnt = TrainImage.GetLength(0);
@@ -919,11 +983,15 @@ namespace MachineLearning {
         [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
         unsafe public extern static int CudaDotSigmoid(Array2_ a, Array2_ b, Array2_ c, Array2_ d);
 
+        [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
+        unsafe public extern static int FullForward(Array2_ prev_A2_, Array2_ Weight_, Array1_ Bias_, Array2_ z2_, Array2_ a2_);
+
         public static bool isFloat64 = true;// isDebug;
         public static bool DebugOut = true;
 
         public static bool isDebug = false;
         public static bool isCNN = false;
+        public static bool CPU = true;
 
         public static double Sigmoid(double z){
             return 1.0 / (1.0 + Math.Exp(-z));

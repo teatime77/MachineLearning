@@ -35,7 +35,6 @@ namespace MachineLearning {
 
         public MainWindow() {
             InitializeComponent();
-            Network.TestCUDA();
         }
 
         private void Window_Loaded(object sender, RoutedEventArgs e) {

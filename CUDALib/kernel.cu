@@ -117,7 +117,7 @@ extern "C" __declspec(dllexport) int CudaSetDevice(int device){
 	// Choose which GPU to run on, change this on a multi-GPU system.
 	chk( cudaSetDevice(device) );
 
-	return (int)cudaSuccess;
+	return 0;
 }
 
 extern "C" __declspec(dllexport) int CudaDeviceReset(){
@@ -125,7 +125,7 @@ extern "C" __declspec(dllexport) int CudaDeviceReset(){
 	// tracing tools such as Nsight and Visual Profiler to show complete traces.
 	chk( cudaDeviceReset() );
 
-	return (int)cudaSuccess;
+	return 0;
 }
 
 extern "C" __declspec(dllexport) double* CudaAlloc(int len){
@@ -137,49 +137,35 @@ extern "C" __declspec(dllexport) double* CudaAlloc(int len){
 
 extern "C" __declspec(dllexport) int CudaFree(double* dev){
 	chk( cudaFree(dev) );
-	return (int)cudaSuccess;
+	return 0;
 }
 
 extern "C" __declspec(dllexport) int CudaToDev(double* dev, double* dt, int len){
 	chk(cudaMemcpy(dev, dt, len * sizeof(double), cudaMemcpyHostToDevice));
 
-	return (int)cudaSuccess;
+	return 0;
 }
 
 extern "C" __declspec(dllexport) int CudaToHost(double* dev, double* dt, int len){
 	chk( cudaMemcpy(dt, dev, len * sizeof(double), cudaMemcpyDeviceToHost) );
-	return (int)cudaSuccess;
+	return 0;
 }
 
 extern "C" __declspec(dllexport) int CudaSync(){
 	chk(cudaDeviceSynchronize());
-	return (int)cudaSuccess;
+	return 0;
 }
 
 // Helper function for using CUDA to add vectors in parallel.
-extern "C" __declspec(dllexport) int CudaAdd1(Array1 a, Array1 b, Array1 c)
-{
-    cudaError_t sts;
-
+extern "C" __declspec(dllexport) int CudaAdd1(Array1 a, Array1 b, Array1 c){
 	chk( cudaDeviceSynchronize() );
 
-    // Launch a kernel on the GPU with one thread for each element.
 	addKernel1<<<1, c.Length>>>(a, b, c);
 
-    // Check for any errors launching the kernel
-    sts = cudaGetLastError();
-    if (sts != cudaSuccess) {
-        fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(sts));
-        goto Error;
-    }
-    
-    // cudaDeviceSynchronize waits for the kernel to finish, and returns
-    // any errors encountered during the launch.
+	chk(cudaGetLastError());
     chk( cudaDeviceSynchronize() );
-
-Error:
     
-    return (int)sts;
+    return 0;
 }
 
 extern "C" __declspec(dllexport) int CudaAdd2(Array2 a, Array2 b, Array2 c){
@@ -191,7 +177,7 @@ extern "C" __declspec(dllexport) int CudaAdd2(Array2 a, Array2 b, Array2 c){
     chk( cudaGetLastError() );
     chk( cudaDeviceSynchronize() );
     
-	return (int)cudaSuccess;
+	return 0;
 }
 
 extern "C" __declspec(dllexport) int CudaAdd3(Array3 a, Array3 b, Array3 c){
@@ -203,7 +189,7 @@ extern "C" __declspec(dllexport) int CudaAdd3(Array3 a, Array3 b, Array3 c){
 	chk(cudaGetLastError());
 	chk(cudaDeviceSynchronize());
 
-	return (int)cudaSuccess;
+	return 0;
 }
 
 extern "C" __declspec(dllexport) int CudaAdd4(Array4 a, Array4 b, Array4 c){
@@ -215,31 +201,43 @@ extern "C" __declspec(dllexport) int CudaAdd4(Array4 a, Array4 b, Array4 c){
 	chk(cudaGetLastError());
 	chk(cudaDeviceSynchronize());
 
-	return (int)cudaSuccess;
+	return 0;
 }
 
-extern "C" __declspec(dllexport) int CudaDotSigmoid(Array2 a, Array2 b, Array2 c, Array2 d)
-{
-	cudaError_t sts;
-
+extern "C" __declspec(dllexport) int CudaDotSigmoid(Array2 a, Array2 b, Array2 c, Array2 d){
 	chk( cudaDeviceSynchronize() );
 
-	// Launch a kernel on the GPU with one thread for each element.
 	dim3 threadsPerBlock(c.nCol, c.nRow);
-	dotSigmoidKernel<<<1, threadsPerBlock >>>(a, b, c, d);
+	dotSigmoidKernel<<<1, threadsPerBlock>>>(a, b, c, d);
 
-	// Check for any errors launching the kernel
-	sts = cudaGetLastError();
-	if (sts != cudaSuccess) {
-		fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(sts));
-		goto Error;
-	}
-
-	// cudaDeviceSynchronize waits for the kernel to finish, and returns
-	// any errors encountered during the launch.
+	chk(cudaGetLastError());
 	chk( cudaDeviceSynchronize() );
 
-Error:
+	return 0;
+}
 
-	return (int)sts;
+/*
+	Z2 = prev_A2.Dot(Weight) + Bias;
+	Activation2 = Z2.Map(Sys.Sigmoid);
+*/
+__global__ void FullForwardKernel(Array2 prev_A2, Array2 Weight, Array1 Bias, Array2 z2, Array2 a2){
+	int i = threadIdx.y;
+	int j = threadIdx.x;
+
+	double sum = dotKernel(prev_A2, Weight, i, j) + Bias.DevDt[j];
+
+	z2.Set(i, j, sum);
+	a2.Set(i, j, Sigmoid(sum));
+}
+
+extern "C" __declspec(dllexport) int FullForward(Array2 prev_A2, Array2 Weight, Array1 Bias, Array2 z2, Array2 a2){
+	chk( cudaDeviceSynchronize() );
+
+	dim3 threadsPerBlock(z2.nCol, z2.nRow);
+	FullForwardKernel<<<1, threadsPerBlock>>>(prev_A2, Weight, Bias, z2, a2);
+
+	chk(cudaGetLastError());
+	chk( cudaDeviceSynchronize() );
+
+	return 0;
 }
