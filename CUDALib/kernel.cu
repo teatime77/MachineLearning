@@ -280,7 +280,7 @@ extern "C" __declspec(dllexport) int FullForward(Array2 prev_A2, Array2 Weight, 
 	return 0;
 }
 
-//-------------------------------------------------- 畳み込みレイヤー
+//-------------------------------------------------- 畳み込みレイヤー Forward
 
 /*
 Z2 = prev_A2.Dot(Weight) + Bias;
@@ -370,6 +370,7 @@ extern "C" __declspec(dllexport) int ConvolutionForward(Array3 prev_A3, Array3 w
 
 	Assert(weight3.nRow == weight3.nCol, L"");
 	Assert(filter_count * filter_size * filter_size < 1024, L"");
+	Assert(filter_count == 20 && filter_size == 5, L"");
 
 	int col1, col2, row1, row2, depth1, depth2;
 
@@ -400,6 +401,53 @@ extern "C" __declspec(dllexport) int ConvolutionForward(Array3 prev_A3, Array3 w
 	blocksPerGrid = dim3(col2, row2, depth2);
 
 	ConvolutionForwardKernel<<<blocksPerGrid, threadsPerBlock>>>(prev_A3, weight3, bias, z4, a4);
+
+	chk(cudaGetLastError());
+	chk(cudaDeviceSynchronize());
+
+	return 0;
+}
+
+
+//-------------------------------------------------- 畳み込みレイヤー NablaWeight
+
+__global__ void ConvolutionNablaWeightKernel(Array3 prev_A3, Array4 deltaT, Array4 NablaWeight4){
+	int img_rows = deltaT.Dims[1];
+	int img_cols = deltaT.Dims[2];
+
+	int filter_idx = threadIdx.z;
+	int r2		   = threadIdx.y;
+	int c2		   = threadIdx.x;
+	int batch_idx  = blockIdx.x;
+
+	double nabla_w = 0.0;
+
+	// 出力の行に対し
+	for (int r1 = 0; r1 < img_rows; r1++) {
+
+		// 出力の列に対し
+		for (int c1 = 0; c1 < img_cols; c1++) {
+
+			double delta = deltaT.At(batch_idx, r1, c1, filter_idx);
+			if (delta != 0) {
+
+				nabla_w += delta * prev_A3.At(batch_idx, r1 + r2, c1 + c2);
+			}
+		}
+	}
+
+	NablaWeight4.Set(batch_idx, filter_idx, r2, c2, nabla_w);
+
+}
+
+extern "C" __declspec(dllexport) int ConvolutionNablaWeight(Array3 prev_A3, Array4 deltaT, Array4 NablaWeight4){
+	chk(cudaDeviceSynchronize());
+
+	Assert(NablaWeight4.Dims[3] * NablaWeight4.Dims[2] * NablaWeight4.Dims[1] < 1024, L"Convolution-Nabla-Weight");
+
+	dim3 threadsPerBlock(NablaWeight4.Dims[3], NablaWeight4.Dims[2], NablaWeight4.Dims[1]);
+
+	ConvolutionNablaWeightKernel<<<NablaWeight4.Dims[0], threadsPerBlock>>>(prev_A3, deltaT, NablaWeight4);
 
 	chk(cudaGetLastError());
 	chk(cudaDeviceSynchronize());

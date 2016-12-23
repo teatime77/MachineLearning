@@ -1050,6 +1050,26 @@ namespace MachineLearning {
             return max;
         }
 
+        public double Sum() {
+            int n0 = dt.GetLength(0);
+            int n1 = dt.GetLength(1);
+            int n2 = dt.GetLength(2);
+            int n3 = dt.GetLength(3);
+            double sum = 0;
+
+            for (int i = 0; i < n0; i++) {
+                for (int j = 0; j < n1; j++) {
+                    for (int k = 0; k < n2; k++) {
+                        for (int l = 0; l < n3; l++) {
+                            sum += dt[i, j, k, l];
+                        }
+                    }
+                }
+            }
+
+            return sum;
+        }
+
         public static Array4 operator -(Array4 a, Array4 b) {
             return a.Apply((x, y) => x - y, b);
         }

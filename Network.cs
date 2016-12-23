@@ -355,6 +355,8 @@ namespace MachineLearning {
         static Dictionary<string, double> SpanG = new Dictionary<string, double>();
         static Dictionary<string, int> CntC = new Dictionary<string, int>();
         static Dictionary<string, int> CntG = new Dictionary<string, int>();
+        double[] BGSpan = new double[4];
+        int BGCnt = 0;
 
         public override void Forward() {
             Array3 prev_activation = PrevLayer.GetActivation3();
@@ -408,44 +410,9 @@ namespace MachineLearning {
                     }
                 }
             }
-
         }
 
-        public override void Backward(Array2 Y) {
-            PoolingLayer next_layer = NextLayer as PoolingLayer;
-
-            //dC_dZ4 = NextLayer.dC_dZ4.Mul(SigmoidPrime(Z4));
-            Array4 deltaT = next_layer.dC_dZ4 * Z4.Map(Sys.SigmoidPrime);
-
-            Array3 prev_activation = PrevLayer.GetActivation3();
-
-            NablaBiases = new Array2(ParentNetwork.MiniBatchSize, FilterCount);
-            NablaWeight4 = new Array4(ParentNetwork.MiniBatchSize, FilterCount, FilterSize, FilterSize);
-            dC_dA4 = new Array4(ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount);
-
-            // すべてのフィルターに対し
-            for (int filter_idx = 0; filter_idx < FilterCount; filter_idx++) {
-
-                // バッチ内のデータに対し
-                for (int batch_idx = 0; batch_idx < ParentNetwork.MiniBatchSize; batch_idx++) {
-
-                    double nabla_b = 0.0;
-
-                    // 出力の行に対し
-                    for (int r1 = 0; r1 < ImgRows; r1++) {
-
-                        // 出力の列に対し
-                        for (int c1 = 0; c1 < ImgCols; c1++) {
-
-                            nabla_b += deltaT[batch_idx, r1, c1, filter_idx];
-                            dC_dA4[batch_idx, r1, c1, filter_idx] = next_layer.dC_dZ4[batch_idx, r1, c1, filter_idx];
-                        }
-                    }
-
-                    NablaBiases[batch_idx, filter_idx] = nabla_b;
-                }
-            }
-
+        void NablaWeightCPU(Array3 prev_activation, Array4 deltaT) {
             // すべてのフィルターに対し
             for (int filter_idx = 0; filter_idx < FilterCount; filter_idx++) {
 
@@ -478,6 +445,99 @@ namespace MachineLearning {
                         }
                     }
                 }
+            }
+        }
+
+        void NablaWeightGPU(Array3 prev_A3, Array4 deltaT) {
+            unsafe{
+                fixed (double* prev_A3_dev = prev_A3.dt, deltaT_dev = deltaT.dt, NablaWeight4_dev = NablaWeight4.dt) {
+                    Array3_ prev_A3_ = new Array3_(prev_A3_dev, prev_A3);
+                    Array4_ deltaT_ = new Array4_(deltaT_dev, deltaT);
+                    Array4_ NablaWeight4_ = new Array4_(NablaWeight4_dev, NablaWeight4, false);
+
+                    Sys.ConvolutionNablaWeight(prev_A3_, deltaT_, NablaWeight4_);
+
+                    NablaWeight4_.ToHost();
+                    Sys.CudaSync();
+                    prev_A3_.Free();
+                    deltaT_.Free();
+                    NablaWeight4_.Free();
+                }
+            }
+        }
+
+        public override void Backward(Array2 Y) {
+            DateTime st = DateTime.Now;
+
+            PoolingLayer next_layer = NextLayer as PoolingLayer;
+
+            //dC_dZ4 = NextLayer.dC_dZ4.Mul(SigmoidPrime(Z4));
+            Array4 deltaT = next_layer.dC_dZ4 * Z4.Map(Sys.SigmoidPrime);
+
+            BGSpan[0] += (DateTime.Now - st).TotalMilliseconds;
+            st = DateTime.Now;
+
+            Array3 prev_activation = PrevLayer.GetActivation3();
+
+            NablaBiases = new Array2(ParentNetwork.MiniBatchSize, FilterCount);
+            NablaWeight4 = new Array4(ParentNetwork.MiniBatchSize, FilterCount, FilterSize, FilterSize);
+
+            dC_dA4 = next_layer.dC_dZ4.Clone();
+
+            BGSpan[1] += (DateTime.Now - st).TotalMilliseconds;
+            st = DateTime.Now;
+
+            // すべてのフィルターに対し
+            for (int filter_idx = 0; filter_idx < FilterCount; filter_idx++) {
+
+                // バッチ内のデータに対し
+                for (int batch_idx = 0; batch_idx < ParentNetwork.MiniBatchSize; batch_idx++) {
+
+                    double nabla_b = 0.0;
+
+                    // 出力の行に対し
+                    for (int r1 = 0; r1 < ImgRows; r1++) {
+
+                        // 出力の列に対し
+                        for (int c1 = 0; c1 < ImgCols; c1++) {
+
+                            nabla_b += deltaT[batch_idx, r1, c1, filter_idx];
+                        }
+                    }
+
+                    NablaBiases[batch_idx, filter_idx] = nabla_b;
+                }
+            }
+            BGSpan[2] += (DateTime.Now - st).TotalMilliseconds;
+            st = DateTime.Now;
+
+            if (Sys.CPU) {
+
+                NablaWeightCPU(prev_activation, deltaT);
+            }
+            else {
+
+                if (Sys.GPUDebug) {
+
+                    NablaWeightCPU(prev_activation, deltaT);
+                    Array4 NablaWeight4_sv = NablaWeight4.Clone();
+                    NablaWeight4 = new Array4(NablaWeight4.Shape());
+
+                    double d = (NablaWeight4 - NablaWeight4_sv).Map(Math.Abs).Max();
+                    Debug.Assert(d < 0.000000001);
+                }
+                else {
+
+                    NablaWeightGPU(prev_activation, deltaT);
+                }
+            }
+
+            BGSpan[3] += (DateTime.Now - st).TotalMilliseconds;
+            BGCnt++;
+
+            if (BGCnt % 100 == 0) {
+
+                Debug.WriteLine("BG {0} {1} {2} {3}", BGSpan[0] / BGCnt, BGSpan[1] / BGCnt, BGSpan[2] / BGCnt, BGSpan[3] / BGCnt);
             }
         }
 
@@ -1075,11 +1135,14 @@ namespace MachineLearning {
         [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
         unsafe public extern static int ConvolutionForward(Array3_ prev_A3, Array3_ weight3, Array1_ bias, Array4_ z4, Array4_ a4);
 
+        [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
+        unsafe public extern static int ConvolutionNablaWeight(Array3_ prev_A3, Array4_ deltaT, Array4_ NablaWeight4);
+
         public static bool isFloat64 = true;// isDebug;
         public static bool DebugOut = true;
 
         public static bool isDebug = false;
-        public static bool GPUDebug = true;
+        public static bool GPUDebug = false;
         public static bool isCNN = true;
         public static bool CPU = false;
 

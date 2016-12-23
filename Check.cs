@@ -9,7 +9,7 @@ namespace MachineLearning {
         bool DoVerifySub2 = false;
         bool DoVerifySub4 = true;
         bool DoVerifyDeltaActivation2 = false;
-        bool DoVerifyDeltaActivation4 = true;
+        bool DoVerifyDeltaActivation4 = false;
 
         void Output(string path, Array3 ret) {
             double err = ret.Map(Math.Abs).Max();
