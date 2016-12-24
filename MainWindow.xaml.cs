@@ -103,16 +103,7 @@ namespace MachineLearning {
             Buffer.BlockCopy(buf, 8, theNetwork.TestLabel, 0, test_cnt);
 
             Task.Run(() => {
-                if (Sys.isDebug) {
-
-                    theNetwork.SGD(30, 1, 3.0);
-                }
-                else {
-
-                    //theNetwork.SGD(30, 11, 3.0);
-                    //theNetwork.SGD(30, 12, 10.0);
-                    theNetwork.SGD(30, 10, 10.0);
-                }
+                theNetwork.SGD(30);
             });
 
             PaintTimer = new DispatcherTimer(DispatcherPriority.Normal);

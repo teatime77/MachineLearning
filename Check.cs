@@ -6,10 +6,14 @@ using System.IO;
 
 namespace MachineLearning {
     public partial class Network {
-        bool DoVerifySub2 = false;
-        bool DoVerifySub4 = true;
-        bool DoVerifyDeltaActivation2 = false;
-        bool DoVerifyDeltaActivation4 = false;
+        public static int MiniBatchSize = 10;  // 1
+        public static double Eta = 3.0;        // 10.0
+        public static double Eta2 = Eta / MiniBatchSize;
+
+        public static bool DoVerifySub2 = false;
+        public static bool DoVerifySub4 = false;
+        public static bool DoVerifyDeltaActivation2 = false;
+        public static bool DoVerifyDeltaActivation4 = false;
 
         Array3 LastActivation;
         Array3 DiffA;
@@ -382,7 +386,7 @@ namespace MachineLearning {
             double eta2 = eta / MiniBatchSize;
 
             foreach (Layer layer in Layers) {
-                layer.UpdateParameter(eta2);
+                layer.UpdateParameter();
             }
 
             foreach (Layer layer in Layers) {

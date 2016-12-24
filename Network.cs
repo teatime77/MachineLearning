@@ -7,7 +7,6 @@ using System.IO;
 
 namespace MachineLearning {
     public class Layer {
-        public Network ParentNetwork;
         public int FwCnt = 0;
         public double FwTime = 0;
         public int BwCnt = 0;
@@ -68,7 +67,7 @@ namespace MachineLearning {
             BwTime += (DateTime.Now - startTime).TotalMilliseconds;
         }
 
-        public virtual void UpdateParameter(double eta2) {
+        public virtual void UpdateParameter() {
         }
     }
 
@@ -228,12 +227,12 @@ namespace MachineLearning {
             NablaB = new Array1(from c in dC_dZ2.Cols() select c.Sum());
             NablaW = PrevLayer.GetActivation2().T().Dot( dC_dZ2 );
 
-            if (Sys.isDebug) {
+            if (Network.DoVerifySub2) {
 
                 NablaBiases = dC_dZ2;
                 // constructor(rows, cols, init, column_major, depth)
-                NablaWeights = new Array3(ParentNetwork.MiniBatchSize, Weight.nRow, Weight.nCol);
-                for (int batch_idx = 0; batch_idx < ParentNetwork.MiniBatchSize; batch_idx++) {
+                NablaWeights = new Array3(Network.MiniBatchSize, Weight.nRow, Weight.nCol);
+                for (int batch_idx = 0; batch_idx < Network.MiniBatchSize; batch_idx++) {
                     for (int r = 0; r < Weight.nRow; r++) {
                         for (int c = 0; c < Weight.nCol; c++) {
                             NablaWeights[batch_idx, r, c] = PrevLayer.GetActivation2()[batch_idx, r] * dC_dZ2[batch_idx, c];
@@ -243,9 +242,9 @@ namespace MachineLearning {
             }
         }
 
-        public override void UpdateParameter(double eta2) {
-            Weight = Weight - eta2 * NablaW;
-            Bias = Bias - eta2 * NablaB;
+        public override void UpdateParameter() {
+            Weight = Weight - Network.Eta2 * NablaW;
+            Bias = Bias - Network.Eta2 * NablaB;
         }
     }
 
@@ -294,7 +293,7 @@ namespace MachineLearning {
             Array3 prev_activation = PrevLayer.GetActivation3();
 
             // バッチ内のデータに対し
-            for (int batch_idx = 0; batch_idx < ParentNetwork.MiniBatchSize; batch_idx++) {
+            for (int batch_idx = 0; batch_idx < Network.MiniBatchSize; batch_idx++) {
 
                 // 出力の行に対し
                 for (int r1 = 0; r1 < ImgRows; r1++) {
@@ -362,10 +361,10 @@ namespace MachineLearning {
         public override void Forward() {
             Array3 prev_activation = PrevLayer.GetActivation3();
 
-            if (Z4 == null || !Enumerable.SequenceEqual(Z4.Shape(), new int[] { ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount })) {
+            if (Z4 == null || !Enumerable.SequenceEqual(Z4.Shape(), new int[] { Network.MiniBatchSize, ImgRows, ImgCols, FilterCount })) {
 
-                Z4 = new Array4(ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount);
-                Activation4 = new Array4(ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount);
+                Z4 = new Array4(Network.MiniBatchSize, ImgRows, ImgCols, FilterCount);
+                Activation4 = new Array4(Network.MiniBatchSize, ImgRows, ImgCols, FilterCount);
             }
 
 
@@ -424,7 +423,7 @@ namespace MachineLearning {
                     for (int c2 = 0; c2 < FilterSize; c2++) {
 
                         // バッチ内のデータに対し
-                        for (int batch_idx = 0; batch_idx < ParentNetwork.MiniBatchSize; batch_idx++) {
+                        for (int batch_idx = 0; batch_idx < Network.MiniBatchSize; batch_idx++) {
 
                             double nabla_w = 0.0;
 
@@ -480,8 +479,8 @@ namespace MachineLearning {
 
             Array3 prev_activation = PrevLayer.GetActivation3();
 
-            NablaBiases = new Array2(ParentNetwork.MiniBatchSize, FilterCount);
-            NablaWeight4 = new Array4(ParentNetwork.MiniBatchSize, FilterCount, FilterSize, FilterSize);
+            NablaBiases = new Array2(Network.MiniBatchSize, FilterCount);
+            NablaWeight4 = new Array4(Network.MiniBatchSize, FilterCount, FilterSize, FilterSize);
 
             dC_dA4 = next_layer.dC_dZ4.Clone();
 
@@ -492,7 +491,7 @@ namespace MachineLearning {
             for (int filter_idx = 0; filter_idx < FilterCount; filter_idx++) {
 
                 // バッチ内のデータに対し
-                for (int batch_idx = 0; batch_idx < ParentNetwork.MiniBatchSize; batch_idx++) {
+                for (int batch_idx = 0; batch_idx < Network.MiniBatchSize; batch_idx++) {
 
                     double nabla_b = 0.0;
 
@@ -542,13 +541,13 @@ namespace MachineLearning {
             }
         }
 
-        public override void UpdateParameter(double eta2) {
-            double eta3 = eta2 / (FilterSize * FilterSize);
+        public override void UpdateParameter() {
+            double eta3 = Network.Eta2 / (FilterSize * FilterSize);
 
             // すべてのフィルターに対し
             for (int filter_idx = 0; filter_idx < FilterCount; filter_idx++) {
 
-                double nabla_bias = (from batch_idx in Enumerable.Range(0, ParentNetwork.MiniBatchSize) select NablaBiases[batch_idx, filter_idx]).Sum();
+                double nabla_bias = (from batch_idx in Enumerable.Range(0, Network.MiniBatchSize) select NablaBiases[batch_idx, filter_idx]).Sum();
                 Bias[filter_idx] -= eta3 * nabla_bias;
 
                 // フィルターの行に対し
@@ -559,7 +558,7 @@ namespace MachineLearning {
                         double nabla_w = 0;
 
                         // バッチ内のデータに対し
-                        for (int batch_idx = 0; batch_idx < ParentNetwork.MiniBatchSize; batch_idx++) {
+                        for (int batch_idx = 0; batch_idx < Network.MiniBatchSize; batch_idx++) {
                             nabla_w += NablaWeight4[batch_idx, filter_idx, r2, c2];
                         }
 
@@ -608,12 +607,12 @@ namespace MachineLearning {
             ConvolutionalLayer prev_Layer = PrevLayer as ConvolutionalLayer;
             if (! RetainMaxIdx) {
 
-                Activation4 = new Array4(ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount);
-                MaxIdx = new int[ParentNetwork.MiniBatchSize, ImgRows, ImgCols, FilterCount];
+                Activation4 = new Array4(Network.MiniBatchSize, ImgRows, ImgCols, FilterCount);
+                MaxIdx = new int[Network.MiniBatchSize, ImgRows, ImgCols, FilterCount];
             }
 
             // バッチ内のデータに対し
-            for (int batch_idx = 0; batch_idx < ParentNetwork.MiniBatchSize; batch_idx++) {
+            for (int batch_idx = 0; batch_idx < Network.MiniBatchSize; batch_idx++) {
 
                 // すべての行に対し
                 for (int r1 = 0; r1 < ImgRows; r1++) {
@@ -661,7 +660,7 @@ namespace MachineLearning {
                 }
             }
 
-            Activation2 = (Array2)Activation4.Reshape(ParentNetwork.MiniBatchSize, ImgRows * ImgCols * FilterCount);
+            Activation2 = (Array2)Activation4.Reshape(Network.MiniBatchSize, ImgRows * ImgCols * FilterCount);
         }
 
         public override void Backward(Array2 Y) {
@@ -673,7 +672,7 @@ namespace MachineLearning {
             dC_dZ4 = new Array4(prev_Layer.Activation4.Shape());
 
             // バッチ内のデータに対し
-            for (int batch_idx = 0; batch_idx < ParentNetwork.MiniBatchSize; batch_idx++) {
+            for (int batch_idx = 0; batch_idx < Network.MiniBatchSize; batch_idx++) {
 
                 // すべての行に対し
                 for (int r1 = 0; r1 < ImgRows; r1++) {
@@ -820,7 +819,6 @@ namespace MachineLearning {
     }
 
     public partial class Network {
-        public int MiniBatchSize;
         public Layer[] Layers;
 
         public byte[,] TrainImage;
@@ -978,7 +976,6 @@ namespace MachineLearning {
 
             Layer prev_layer = null;
             foreach(Layer layer in layers) {
-                layer.ParentNetwork = this;
                 layer.init(prev_layer);
                 prev_layer = layer;
             }
@@ -992,10 +989,8 @@ namespace MachineLearning {
             get { return Layers[0] as InputLayer; }
         }
 
-        public void SGD(int epochs, int mini_batch_size, double eta) {
+        public void SGD(int epochs) {
             Network.TestCUDA();
-
-            MiniBatchSize = mini_batch_size;
 
             int train_cnt = TrainImage.GetLength(0);
             int data_len = TrainImage.GetLength(1);
@@ -1021,7 +1016,7 @@ namespace MachineLearning {
                         }
                     }
 
-                    UpdateMiniBatch(X, Y, eta, epoch_idx, idxes, mini_batch_cnt, mini_batch_idx);
+                    UpdateMiniBatch(X, Y, epoch_idx, idxes, mini_batch_cnt, mini_batch_idx);
                 }
 
                 int e = Evaluate();
@@ -1029,7 +1024,7 @@ namespace MachineLearning {
             }
         }
 
-        void UpdateMiniBatch(Array2 X, Array2 Y, double eta, int epoch_idx, int[] idxes, int mini_batch_cnt, int mini_batch_idx) {
+        void UpdateMiniBatch(Array2 X, Array2 Y, int epoch_idx, int[] idxes, int mini_batch_cnt, int mini_batch_idx) {
             if(FirstLayer.NextLayer is FullyConnectedLayer) {
 
                 FirstLayer.Activation2 = X;
@@ -1043,19 +1038,17 @@ namespace MachineLearning {
                 layer.forward2();
             }
 
-            double eta2 = eta / MiniBatchSize;
-
             for (int i = Layers.Length - 1; 1 <= i; i--) {
                 Layers[i].backward2(Y);
             }
 
-            if (Sys.isDebug) {
+            if (DoVerifySub2 || DoVerifySub4 || DoVerifyDeltaActivation2 || DoVerifyDeltaActivation4) {
 
                 Verify(X, Y);
             }
 
             foreach (Layer layer in Layers) {
-                layer.UpdateParameter(eta2);
+                layer.UpdateParameter();
             }
         }
 
@@ -1139,10 +1132,9 @@ namespace MachineLearning {
         [DllImport("CUDALib.dll", CallingConvention = CallingConvention.Cdecl)]
         unsafe public extern static int ConvolutionNablaWeight(Array3_ prev_A3, Array4_ deltaT, Array4_ NablaWeight4);
 
-        public static bool isFloat64 = true;// isDebug;
+        public static bool isFloat64 = true;
         public static bool DebugOut = true;
 
-        public static bool isDebug = false;
         public static bool GPUDebug = false;
         public static bool isCNN = false;
         public static bool CPU = false;
