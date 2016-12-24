@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.IO;
 
 namespace MachineLearning {
     public class Layer {
@@ -998,11 +999,15 @@ namespace MachineLearning {
 
             int train_cnt = TrainImage.GetLength(0);
             int data_len = TrainImage.GetLength(1);
-            for (int j = 0; j < epochs; j++) {
+            int mini_batch_cnt = train_cnt / MiniBatchSize;
+
+            LastActivation = new Array3(epochs, mini_batch_cnt, 10);
+            DiffA = new Array3(mini_batch_cnt, MiniBatchSize, 10);
+
+            for (int epoch_idx = 0; epoch_idx < epochs; epoch_idx++) {
 
                 int[] idxes = Sys.RandomSampling(train_cnt, train_cnt);
 
-                int mini_batch_cnt = train_cnt / MiniBatchSize;
                 for (int mini_batch_idx = 0; mini_batch_idx < mini_batch_cnt; mini_batch_idx++ ) {
                     Array2 X = new Array2(MiniBatchSize, data_len);
                     Array2 Y = new Array2(MiniBatchSize, 10);
@@ -1016,19 +1021,15 @@ namespace MachineLearning {
                         }
                     }
 
-                    UpdateMiniBatch(X, Y, eta);
-
-                    if(mini_batch_idx % 1000 == 0) {
-                        Debug.WriteLine("mini batch idx {0}", mini_batch_idx);
-                    }
+                    UpdateMiniBatch(X, Y, eta, epoch_idx, idxes, mini_batch_cnt, mini_batch_idx);
                 }
 
                 int e = Evaluate();
-                Debug.WriteLine("Epoch {0}: {1} / {2}", j, e, TestImage.GetLength(0));
+                Debug.WriteLine("Epoch {0}: {1} / {2}", epoch_idx, e, TestImage.GetLength(0));
             }
         }
 
-        void UpdateMiniBatch(Array2 X, Array2 Y, double eta) {
+        void UpdateMiniBatch(Array2 X, Array2 Y, double eta, int epoch_idx, int[] idxes, int mini_batch_cnt, int mini_batch_idx) {
             if(FirstLayer.NextLayer is FullyConnectedLayer) {
 
                 FirstLayer.Activation2 = X;
@@ -1143,7 +1144,7 @@ namespace MachineLearning {
 
         public static bool isDebug = false;
         public static bool GPUDebug = false;
-        public static bool isCNN = true;
+        public static bool isCNN = false;
         public static bool CPU = false;
 
         public static double Sigmoid(double z){

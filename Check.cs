@@ -11,13 +11,14 @@ namespace MachineLearning {
         bool DoVerifyDeltaActivation2 = false;
         bool DoVerifyDeltaActivation4 = false;
 
+        Array3 LastActivation;
+        Array3 DiffA;
+
         void Output(string path, Array3 ret) {
             double err = ret.Map(Math.Abs).Max();
             double avg = ret.Map(Math.Abs).Sum() / ret.dt.Length;
 
-            StringWriter sw = new StringWriter();
-            sw.WriteLine("Max,{0},Avg,{1}\r\n{2}", err, avg, ret.ToString());
-            File.WriteAllText(path + ".csv", sw.ToString());
+            File.WriteAllText(path + ".csv", ret.ToString());
         }
 
         void VerifySub2(Array2 X, Array2 Y, Array1 sv_cost, FullyConnectedLayer layer, double delta_param, Array1 nabla, double[,,] ret, int i_ret) {
@@ -366,6 +367,91 @@ namespace MachineLearning {
 
             foreach (PoolingLayer player in from x in Layers where x is PoolingLayer select x) {
                 player.RetainMaxIdx = false;
+            }
+        }
+
+        void VerifyResult(Array2 X, Array2 Y, double eta, int epoch_idx, int[] idxes, int mini_batch_cnt, int mini_batch_idx) {
+            // パラメータの更新前の最後のレイヤーの出力を保存する。
+            double[,] last_a = new double[MiniBatchSize, 10];
+            for (int batch_idx = 0; batch_idx < MiniBatchSize; batch_idx++) {
+                for (int c = 0; c < 10; c++) {
+                    last_a[batch_idx, c] = LastLayer.Activation2[batch_idx, c];
+                }
+            }
+
+            double eta2 = eta / MiniBatchSize;
+
+            foreach (Layer layer in Layers) {
+                layer.UpdateParameter(eta2);
+            }
+
+            foreach (Layer layer in Layers) {
+                layer.forward2();
+            }
+
+            for (int batch_idx = 0; batch_idx < MiniBatchSize; batch_idx++) {
+                var idx = idxes[mini_batch_idx * MiniBatchSize + batch_idx];
+                int n = TrainLabel[idx];
+                for (int c = 0; c < 10; c++) {
+                    double diff = LastLayer.Activation2[batch_idx, c] - last_a[batch_idx, c];
+                    if (c != n) {
+                        diff = -diff;
+                    }
+                    DiffA[mini_batch_idx, batch_idx, c] = diff;
+                }
+            }
+
+            if (mini_batch_idx != 0 && mini_batch_idx % 100 == 0) {
+                StringWriter sw = new StringWriter();
+
+                for (int mini_batch_idx_2 = 0; mini_batch_idx_2 <= mini_batch_idx; mini_batch_idx_2++) {
+                    for (int batch_idx = 0; batch_idx < MiniBatchSize; batch_idx++) {
+                        for (int c = 0; c < 10; c++) {
+                            sw.Write(",{0}", DiffA[mini_batch_idx_2, batch_idx, c]);
+                        }
+                        sw.WriteLine("");
+                    }
+                    sw.WriteLine("");
+                }
+                try {
+                    File.WriteAllText(string.Format("DiffA-{0}.csv", epoch_idx), sw.ToString());
+                }
+                catch (Exception) { }
+            }
+        }
+
+        void VerifyLastActivation(Array2 X, Array2 Y, double eta, int epoch_idx, int[] idxes, int mini_batch_cnt, int mini_batch_idx) {
+
+            for (int c = 0; c < 10; c++) {
+                LastActivation[epoch_idx, mini_batch_idx, c] = LastLayer.Activation2[0, c];
+            }
+
+            if (mini_batch_idx % 100 == 0) {
+                StringWriter sw = new StringWriter();
+
+                for (int k = 0; k <= mini_batch_idx; k++) {
+                    var idx = idxes[k * MiniBatchSize + 0];
+                    int n = TrainLabel[idx];
+                    for (int c = 0; c < 10; c++) {
+                        if (c == n) {
+                            sw.Write(",");
+                        }
+                        else {
+                            sw.Write(",{0}", LastActivation[epoch_idx, k, c]);
+                        }
+                    }
+                    sw.Write(",{0},{1}", LastActivation[epoch_idx, k, n], n);
+                    sw.WriteLine();
+                }
+
+                try {
+                    File.WriteAllText(string.Format("LastActivation-{0}.csv", epoch_idx), sw.ToString());
+                }
+                catch (Exception) { }
+            }
+
+            if (mini_batch_idx % 1000 == 0) {
+                Debug.WriteLine("mini batch idx {0}", mini_batch_idx);
             }
         }
 
