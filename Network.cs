@@ -227,10 +227,13 @@ namespace MachineLearning {
             NablaB = new Array1(from c in dC_dZ2.Cols() select c.Sum());
             NablaW = PrevLayer.GetActivation2().T().Dot( dC_dZ2 );
 
-            if (Network.DoVerifySub2) {
+            if (Network.DoVerifyDeltaParam2) {
 
+                // Z = prev-A . Weight + Bias;
+                // dC/dB = dC/dZ * dZ/dB = dC/dZ * 1 = dC/dZ
                 NablaBiases = dC_dZ2;
-                // constructor(rows, cols, init, column_major, depth)
+
+                // dC/dWij = dC/dZ * dZ/dWij = dC/dZj * prev-Ai
                 NablaWeights = new Array3(Network.MiniBatchSize, Weight.nRow, Weight.nCol);
                 for (int batch_idx = 0; batch_idx < Network.MiniBatchSize; batch_idx++) {
                     for (int r = 0; r < Weight.nRow; r++) {
@@ -1042,7 +1045,7 @@ namespace MachineLearning {
                 Layers[i].backward2(Y);
             }
 
-            if (DoVerifySub2 || DoVerifySub4 || DoVerifyDeltaActivation2 || DoVerifyDeltaActivation4) {
+            if (DoVerifyDeltaParam2 || DoVerifyDeltaParam4 || DoVerifyDeltaActivation2 || DoVerifyDeltaActivation4) {
 
                 Verify(X, Y);
             }
@@ -1136,7 +1139,7 @@ namespace MachineLearning {
         public static bool DebugOut = true;
 
         public static bool GPUDebug = false;
-        public static bool isCNN = false;
+        public static bool isCNN = true;
         public static bool CPU = false;
 
         public static double Sigmoid(double z){

@@ -753,6 +753,10 @@ namespace MachineLearning {
             nCol = dt.GetLength(2);
         }
 
+        public Array3 Clone() {
+            return new Array3((double[,,])dt.Clone());
+        }
+
         public override Array GetData() {
             return dt;
         }
