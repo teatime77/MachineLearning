@@ -10,8 +10,11 @@ namespace MachineLearning {
         public static double Eta = 3.0;        // 10.0
         public static double Eta2 = Eta / MiniBatchSize;
 
-        public static bool DoVerifyDeltaParam2 = false;
-        public static bool DoVerifyDeltaParam4 = true;
+        public static bool DoVerifyFull = true;
+        public static bool DoVerifyConv = true;
+        public static bool DoVerifySingleParam = false;
+        public static bool DoVerifyMultiParam = true;
+        public static bool DoVerifyMultiParamAll = true;
         public static bool DoVerifyDeltaActivation2 = false;
         public static bool DoVerifyDeltaActivation4 = false;
 
@@ -56,7 +59,7 @@ namespace MachineLearning {
             CheckEqual2(dZ_dA_dZ, dActivation2, out ret[i_ret, 2, 0], out ret[i_ret, 2, 1]);
         }
 
-        void VerifySingleParam4(Array2 X, Array2 Y, Array1 sv_cost, ConvolutionalLayer layer, double delta_param, Array1 dC_dP, double[,,] ret, int i_ret) {
+        void VerifySingleParam4(Array2 X, Array2 Y, Array1 sv_cost, ConvolutionalLayer layer, int batch_idx, double delta_param, Array1 dC_dP, double[,,] ret, int i_ret) {
             for (Layer l = layer; l != null; l = l.NextLayer) {
                 l.forward2();
             }
@@ -78,19 +81,23 @@ namespace MachineLearning {
             int col_size = dA.dt.GetLength(1) * dA.dt.GetLength(2) * dA.dt.GetLength(3);
 
             // ΔA * dC/dA
-            Array1 dA_dC_dA = ((dA * layer.dC_dA4).Reshape(row_size, col_size) as Array2).SumRow();
+            Array2 dA_dC_dA = (dA * layer.dC_dA4).Reshape(row_size, col_size) as Array2;
+
+            // Σ ΔAi * dC/dAi
+            Array1 sum_dA_dC_dA = dA_dC_dA.SumRow();
 
             // ΔC
             Array1 dC = LastLayer.Cost - sv_cost;
 
             // ΔP * δC/δP
-            Array1 dP_dC_dP = delta_param * dC_dP;
+            //Array1 dP_dC_dP = delta_param * dC_dP;
+            double dP_dC_dP = delta_param * dC_dP[batch_idx];
 
             // ΔC ≒ ΔP * δC/δP 
-            CheckEqual1(dC, dP_dC_dP, out ret[i_ret, 0, 0], out ret[i_ret, 0, 1]);
+            CheckEqual0(dC[batch_idx], dP_dC_dP, out ret[i_ret, 0, 0], out ret[i_ret, 0, 1]);
 
             // ΔC ≒ ΔA * dC/dA
-            CheckEqual1(dC, dA_dC_dA, out ret[i_ret, 1, 0], out ret[i_ret, 1, 1]);
+            CheckEqual1(dC, sum_dA_dC_dA, out ret[i_ret, 1, 0], out ret[i_ret, 1, 1]);
 
             // dA/dZ
             Array4 dA_dZ = layer.svZ4.Map(Sys.SigmoidPrime);
@@ -102,7 +109,8 @@ namespace MachineLearning {
             CheckEqual2(dA.Reshape(row_size, col_size) as Array2, dZ_dA_dZ.Reshape(row_size, col_size) as Array2, out ret[i_ret, 2, 0], out ret[i_ret, 2, 1]);
         }
 
-        void VerifyMultiParam4(Array2 X, Array2 Y, Array1 sv_cost, ConvolutionalLayer layer, int batch_idx, Array1 dP, Array1 dC_dP, double[,,] ret, int i_ret) {
+
+        void VerifyMultiParam(Array2 X, Array2 Y, Array1 sv_cost, Layer layer, int batch_idx, Array1 dP, Array1 dC_dP, double[,,] ret, int i_ret) {
             for (Layer l = layer; l != null; l = l.NextLayer) {
                 l.forward2();
             }
@@ -114,40 +122,64 @@ namespace MachineLearning {
                 }
             }
 
+            Array2 Z, svZ, A, svA, svdC_dA;
+
+            if(layer is FullyConnectedLayer) {
+
+                FullyConnectedLayer full_layer = layer as FullyConnectedLayer;
+
+                Z = full_layer.Z2;
+                svZ = full_layer.svZ2;
+                A = full_layer.Activation2;
+                svA = full_layer.svActivation2;
+                svdC_dA = full_layer.svdC_dA2;
+            }
+            else {
+                ConvolutionalLayer cnv_layer = layer as ConvolutionalLayer;
+
+                int row_size = cnv_layer.Z4.dt.GetLength(0);
+                int col_size = cnv_layer.Z4.dt.GetLength(1) * cnv_layer.Z4.dt.GetLength(2) * cnv_layer.Z4.dt.GetLength(3);
+
+                Z = cnv_layer.Z4.Reshape(row_size, col_size) as Array2;
+                svZ = cnv_layer.svZ4.Reshape(row_size, col_size) as Array2;
+                A = cnv_layer.Activation4.Reshape(row_size, col_size) as Array2;
+                svA= cnv_layer.svActivation4.Reshape(row_size, col_size) as Array2;
+                svdC_dA= cnv_layer.svdC_dA4.Reshape(row_size, col_size) as Array2;
+            }
+
             // ΔZ
-            Array4 dZ = layer.Z4 - layer.svZ4;
+            Array2 dZ = Z - svZ;
 
             // ΔA
-            Array4 dA = layer.Activation4 - layer.svActivation4;
-
-            int row_size = dA.dt.GetLength(0);
-            int col_size = dA.dt.GetLength(1) * dA.dt.GetLength(2) * dA.dt.GetLength(3);
+            Array2 dA = A - svA;
 
             // ΔA * dC/dA
-            double dA_dC_dA = ((dA * layer.dC_dA4).Reshape(row_size, col_size) as Array2).Row(batch_idx).Sum();
+            Array2 dA_dC_dA = dA * svdC_dA;
+
+            // Σ ΔAi * dC/dAi
+            Array1 sum_dA_dC_dA = dA_dC_dA.SumRow();
 
             // ΔC
-            double dC = LastLayer.Cost[batch_idx] - sv_cost[batch_idx];
+            Array1 dC = LastLayer.Cost - sv_cost;
 
             // Σ ΔPi * δC/δPi
             double dP_dC_dP = (dP * dC_dP).Sum();
 
             // ΔC ≒ ΔP * δC/δP 
-            CheckEqual0(dC, dP_dC_dP, out ret[i_ret, 0, 0], out ret[i_ret, 0, 1]);
+            CheckEqual0(dC.dt[batch_idx], dP_dC_dP, out ret[i_ret, 0, 0], out ret[i_ret, 0, 1]);
 
-            // ΔC ≒ ΔA * dC/dA
-            CheckEqual0(dC, dA_dC_dA, out ret[i_ret, 1, 0], out ret[i_ret, 1, 1]);
+            // ΔC ≒ Σ ΔAi * dC/dAi
+            CheckEqual1(dC, sum_dA_dC_dA, out ret[i_ret, 1, 0], out ret[i_ret, 1, 1]);
 
             // dA/dZ
-            Array4 dA_dZ = layer.svZ4.Map(Sys.SigmoidPrime);
+            Array2 dA_dZ = svZ.Map(Sys.SigmoidPrime);
 
             // ΔZ * dA/dZ
-            Array4 dZ_dA_dZ = dZ * dA_dZ;
+            Array2 dZ_dA_dZ = dZ * dA_dZ;
 
             // ΔA ≒ ΔZ * dA/dZ
-            CheckEqual2(dA.Reshape(row_size, col_size) as Array2, dZ_dA_dZ.Reshape(row_size, col_size) as Array2, out ret[i_ret, 2, 0], out ret[i_ret, 2, 1]);
+            CheckEqual2(dA, dZ_dA_dZ, out ret[i_ret, 2, 0], out ret[i_ret, 2, 1]);
         }
-
 
         void VerifyDeltaActivation2(Array2 X, Array2 Y, Array1 sv_cost, FullyConnectedLayer layer) {
             Array2 A = layer.GetActivation2();
@@ -295,6 +327,8 @@ namespace MachineLearning {
         }
 
         void Verify(Array2 X, Array2 Y) {
+            Array3 ret = null;
+            int i_ret;
             double delta_param;
 
             foreach (PoolingLayer player in from x in Layers where x is PoolingLayer select x) {
@@ -304,12 +338,12 @@ namespace MachineLearning {
             Array1 sv_cost = LastLayer.Cost.Clone();
 
             foreach (Layer layer in Layers) {
+                layer.SaveParam();
                 if (layer is FullyConnectedLayer) {
                     FullyConnectedLayer fl = layer as FullyConnectedLayer;
 
                     fl.svActivation2 = fl.Activation2.Clone();
                     fl.svZ2 = fl.Z2.Clone();
-                    fl.svdC_dA2 = fl.dC_dA2.Clone();
                 }
                 else if (layer is Layer4) {
                     Layer4 l4 = layer as Layer4;
@@ -327,9 +361,147 @@ namespace MachineLearning {
                 }
             }
 
+
+            if (DoVerifyMultiParamAll) {
+                ret = new Array3(MiniBatchSize, 3, 2);
+                i_ret = 0;
+
+                for (int batch_idx = 0; batch_idx < MiniBatchSize; batch_idx++) {
+
+                    int param_len_sum = (from layer in Layers select layer.ParamLength()).Sum();
+                    Array1 dPall = new Array1(param_len_sum);
+                    Array1 dC_dPall = new Array1(param_len_sum);
+                    int param_idx_all = 0;
+                    foreach (Layer layer in Layers) {
+
+                        int param_len = layer.ParamLength();
+                        if (param_len != 0) {
+
+                            layer.RestoreParam();
+
+                            Array1 dP = new Array1(param_len);
+                            Array1 dC_dP = layer.dC_dPs(batch_idx);
+                            Debug.Assert(dC_dP.Length == param_len);
+
+                            for (int param_i = 0; param_i < param_len; param_i++) {
+
+                                dP[param_i] = dC_dP[param_i] * 0.001;
+                                layer.ParamSet(param_i, layer.ParamAt(param_i) + dP[param_i]);
+
+                                dPall[param_idx_all] = dP[param_i];
+                                dC_dPall[param_idx_all] = dC_dP[param_i];
+                                param_idx_all++;
+                            }
+                        }
+                    }
+
+                    foreach (Layer l in Layers) {
+                        l.forward2();
+                    }
+
+                    for (Layer l = LastLayer; l != null; l = l.PrevLayer) {
+                        l.backward2(Y);
+                    }
+
+                    // ΔC
+                    Array1 dC = LastLayer.Cost - sv_cost;
+
+                    // Σ ΔPi * δC/δPi
+                    double dP_dC_dP = (dPall * dC_dPall).Sum();
+
+                    // ΔC ≒ ΔP * δC/δP 
+                    CheckEqual0(dC.dt[batch_idx], dP_dC_dP, out ret.dt[i_ret, 0, 0], out ret.dt[i_ret, 0, 1]);
+                    i_ret++;
+                }
+                Output("Multi-Param-All", ret);
+
+                foreach (Layer layer in Layers) {
+                    layer.RestoreParam();
+                }
+            }
+
+
             for (Layer layer = LastLayer; layer != null; layer = layer.PrevLayer) {
-                Array3 ret = null;
-                int i_ret;
+                int layer_idx = Layers.ToList().IndexOf(layer);
+
+                if (DoVerifySingleParam && (DoVerifyFull && layer is FullyConnectedLayer || DoVerifyConv && layer is ConvolutionalLayer)) {
+
+                    //-------------------------------------------------- 単一パラメータ
+
+                    for (int batch_idx = 0; batch_idx < MiniBatchSize; batch_idx++) {
+                        int param_len = layer.ParamLength();
+                        ret = new Array3(param_len, 3, 2);
+                        i_ret = 0;
+
+                        for (int param_i = 0; param_i < param_len; ) {
+                            layer.RestoreParam();
+
+                            Array1 dC_dP = layer.dC_dPByParamIdx(param_i);
+
+                            double sv_param = layer.ParamAt(param_i);
+
+                            delta_param = dC_dP[batch_idx] * 0.001;
+                            layer.ParamSet(param_i, sv_param + delta_param);
+
+                            if (layer is FullyConnectedLayer) {
+
+                                VerifySingleParam2(X, Y, sv_cost, layer as FullyConnectedLayer, delta_param, dC_dP, ret.dt, i_ret);
+                            }
+                            else {
+
+                                VerifySingleParam4(X, Y, sv_cost, layer as ConvolutionalLayer, batch_idx, delta_param, dC_dP, ret.dt, i_ret);
+                            }
+
+                            i_ret++;
+
+                            layer.ParamSet(param_i, sv_param);
+
+                            if(param_len < 1000) {
+
+                                param_i++;
+                            }
+                            else {
+
+                                param_i += param_len / 1000;
+                            }
+                        }
+
+                        Output(layer.GetType().Name.Substring(0, 4) + "-Single-Param", ret);
+                        if (batch_idx == 0) {
+
+                            break;
+                        }
+                    }
+                    layer.RestoreParam();
+
+                }
+
+                //-------------------------------------------------- 全パラメータ
+                if (DoVerifyMultiParam && (DoVerifyFull && layer is FullyConnectedLayer || DoVerifyConv && layer is ConvolutionalLayer)) {
+
+                    int param_len = layer.ParamLength();
+                    ret = new Array3(MiniBatchSize, 3, 2);
+                    i_ret = 0;
+                    for (int batch_idx = 0; batch_idx < MiniBatchSize; batch_idx++) {
+
+                        layer.RestoreParam();
+
+                        Array1 dP = new Array1(param_len);
+                        Array1 dC_dP = layer.dC_dPs(batch_idx);
+                        Debug.Assert(dC_dP.Length == param_len);
+
+                        for (int param_i = 0; param_i < param_len; param_i++) {
+
+                            dP[param_i] = dC_dP[param_i] * 0.001;
+                            layer.ParamSet(param_i, layer.ParamAt(param_i) + dP[param_i]);
+                        }
+
+                        VerifyMultiParam(X, Y, sv_cost, layer, batch_idx, dP, dC_dP, ret.dt, i_ret);
+                        i_ret++;
+                    }
+                    Output(string.Format("{0} {1} Multi-Param", layer.GetType().Name.Substring(0, 4), layer_idx), ret);
+                    layer.RestoreParam();
+                }
 
                 if (layer is FullyConnectedLayer) {
                     FullyConnectedLayer fl = layer as FullyConnectedLayer;
@@ -338,132 +510,11 @@ namespace MachineLearning {
 
                         VerifyDeltaActivation2(X, Y, sv_cost, fl);
                     }
-
-                    if (DoVerifyDeltaParam2) {
-
-                        ret = new Array3(fl.Bias.Length + fl.Weight.dt.Length, 3, 2);
-
-                        for (int i = 0; i < fl.Bias.Length; i++) {
-                            double sv_param = fl.Bias[i];
-
-                            delta_param = fl.Bias[i] * 0.001;
-                            fl.Bias[i] += delta_param;
-
-                            Array1 dC_dP = fl.NablaBiases.Col(i);
-                            VerifySingleParam2(X, Y, sv_cost, fl, delta_param, dC_dP, ret.dt, i);
-                            fl.Bias[i] = sv_param;
-                        }
-
-                        for (int r = 0; r < fl.Weight.nRow; r++) {
-                            for (int c = 0; c < fl.Weight.nCol; c++) {
-                                double sv_param = fl.Weight[r, c];
-
-                                delta_param = fl.Weight[r, c] * 0.001;
-                                fl.Weight[r, c] += delta_param;
-
-                                Array1 dC_dP = fl.NablaWeights.Depth(r, c);
-                                VerifySingleParam2(X, Y, sv_cost, fl, delta_param, dC_dP, ret.dt, fl.Bias.Length + r * fl.Weight.nCol + c);
-                                fl.Weight[r, c] = sv_param;
-                            }
-                        }
-                    }
                 }
                 else if (layer is Layer4) {
                     if (DoVerifyDeltaActivation4) {
 
                         VerifyDeltaActivation4(X, Y, sv_cost, layer as Layer4);
-                    }
-
-                    if (DoVerifyDeltaParam4 && layer is ConvolutionalLayer) {
-                        ConvolutionalLayer cnv_layer = layer as ConvolutionalLayer;
-
-                        ret = new Array3(cnv_layer.Bias.Length, 3, 2);
-                        i_ret = 0;
-
-                        for (int filter_idx = 0; filter_idx < cnv_layer.Bias.Length; filter_idx++) {
-                            Array1 dC_dP = cnv_layer.NablaBiases.Col(filter_idx);
-
-                            double sv_param = cnv_layer.Bias[filter_idx];
-
-                            delta_param = sv_param * 0.001;
-                            delta_param = dC_dP[0] * 0.001;
-                            cnv_layer.Bias[filter_idx] += delta_param;
-
-                            VerifySingleParam4(X, Y, sv_cost, cnv_layer, delta_param, dC_dP, ret.dt, i_ret);
-                            cnv_layer.Bias[filter_idx] = sv_param;
-                            i_ret++;
-                        }
-                        Output("Cnv-Bias", ret);
-
-                        ret = new Array3(cnv_layer.Weight3.dt.Length, 3, 2);
-                        i_ret = 0;
-
-                        // すべてのフィルターに対し
-                        for (int filter_idx = 0; filter_idx < cnv_layer.FilterCount; filter_idx++) {
-
-                            // フィルターの行に対し
-                            for (int r2 = 0; r2 < cnv_layer.FilterSize; r2++) {
-
-                                // フィルターの列に対し
-                                for (int c2 = 0; c2 < cnv_layer.FilterSize; c2++) {
-                                    Array1 dC_dP = new Array1( from batch_idx in Enumerable.Range(0, MiniBatchSize) select cnv_layer.NablaWeight4[batch_idx, filter_idx, r2, c2] );
-
-                                    double sv_param = cnv_layer.Weight3[filter_idx, r2, c2];
-
-                                    delta_param = sv_param * 0.00001;
-                                    delta_param = dC_dP[0] * 0.001;
-                                    cnv_layer.Weight3[filter_idx, r2, c2] += delta_param;
-
-                                    VerifySingleParam4(X, Y, sv_cost, cnv_layer, delta_param, dC_dP, ret.dt, i_ret);
-
-                                    cnv_layer.Weight3[filter_idx, r2, c2] = sv_param;
-                                    i_ret++;
-                                }
-                            }
-                        }
-                        Output("Cnv-Weight", ret);
-
-                        ret = new Array3(MiniBatchSize, 3, 2);
-                        i_ret = 0;
-                        for (int batch_idx = 0; batch_idx < MiniBatchSize; batch_idx++) {
-
-                            int param_i = 0;
-                            Array1 dP = new Array1(cnv_layer.Bias.Length + cnv_layer.FilterCount * cnv_layer.FilterSize * cnv_layer.FilterSize);
-                            Array1 dC_dP = new Array1(cnv_layer.Bias.Length + cnv_layer.FilterCount * cnv_layer.FilterSize * cnv_layer.FilterSize);
-
-                            Array1 Bias_sv = cnv_layer.Bias.Clone();
-                            Array3 Weight3_sv = cnv_layer.Weight3.Clone();
-
-                            for (int filter_idx = 0; filter_idx < cnv_layer.Bias.Length; filter_idx++) {
-                                dC_dP[param_i] = cnv_layer.NablaBiases[batch_idx,filter_idx];
-                                dP[param_i] = dC_dP[param_i] * 0.001;
-                                cnv_layer.Bias[filter_idx] += dP[param_i];
-
-                                param_i++;
-                            }
-                            Output("Cnv-Bias", ret);
-
-                            // すべてのフィルターに対し
-                            for (int filter_idx = 0; filter_idx < cnv_layer.FilterCount; filter_idx++) {
-
-                                // フィルターの行に対し
-                                for (int r2 = 0; r2 < cnv_layer.FilterSize; r2++) {
-
-                                    // フィルターの列に対し
-                                    for (int c2 = 0; c2 < cnv_layer.FilterSize; c2++) {
-                                        dC_dP[param_i] = cnv_layer.NablaWeight4[batch_idx, filter_idx, r2, c2];
-                                        dP[param_i] = dC_dP[param_i] * 0.001;
-                                        cnv_layer.Weight3[filter_idx, r2, c2] += dP[param_i];
-
-                                        param_i++;
-                                    }
-                                }
-                            }
-
-                            VerifyMultiParam4(X, Y, sv_cost, cnv_layer, batch_idx, dP, dC_dP, ret.dt, i_ret);
-                            i_ret++;
-                        }
-                        Output("Cnv-Multi-Param", ret);
                     }
                 }
             }

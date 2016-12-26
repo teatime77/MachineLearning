@@ -337,6 +337,8 @@ namespace MachineLearning {
     public delegate double F2(double f1, double f2);
 
     public class ArrayN {
+        public int Length;
+
         public virtual Array GetData() {
             Debug.Assert(false, "Array-N-Get-Data");
             return null;
@@ -410,7 +412,6 @@ namespace MachineLearning {
 
     public class Array1 : ArrayN {
         public double[] dt;
-        public int Length;
 
         public Array1(int len) {
             dt = new double[len];
@@ -524,12 +525,14 @@ namespace MachineLearning {
 
         public Array2(int rows, int cols) {
             dt = new double[rows, cols];
+            Length = dt.Length;
             nRow = dt.GetLength(0);
             nCol = dt.GetLength(1);
         }
 
         public Array2(double[,] init) {
             dt = init;
+            Length = dt.Length;
             nRow = dt.GetLength(0);
             nCol = dt.GetLength(1);
         }
@@ -741,6 +744,7 @@ namespace MachineLearning {
 
         public Array3(int depth, int rows, int cols) {
             dt = new double[depth, rows, cols];
+            Length = dt.Length;
             nDepth = dt.GetLength(0);
             nRow = dt.GetLength(1);
             nCol = dt.GetLength(2);
@@ -748,9 +752,20 @@ namespace MachineLearning {
 
         public Array3(double[,,] init) {
             dt = init;
+            Length = dt.Length;
             nDepth = dt.GetLength(0);
             nRow = dt.GetLength(1);
             nCol = dt.GetLength(2);
+        }
+
+        public void DecomposeIdx(int i, out int d, out int r, out int c) {
+            int j = i;
+            int row_col = nRow * nCol;
+
+            d = j / row_col;
+            j -= d * row_col;
+            r = j / nCol;
+            c = j - r * nCol;
         }
 
         public Array3 Clone() {
@@ -897,14 +912,17 @@ namespace MachineLearning {
 
         public Array4(int n1, int n2, int n3, int n4) {
             dt = new double[n1, n2, n3, n4];
+            Length = dt.Length;
         }
 
         public Array4(int[] shape) {
             dt = new double[shape[0], shape[1], shape[2], shape[3]];
+            Length = dt.Length;
         }
 
         public Array4(double[,,,] init) {
             dt = init;
+            Length = dt.Length;
         }
 
         public Array4 Clone() {

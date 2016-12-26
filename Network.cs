@@ -47,6 +47,34 @@ namespace MachineLearning {
             return null;
         }
 
+        public virtual void SaveParam() {
+        }
+
+        public virtual void RestoreParam() {
+        }
+
+        public virtual int ParamLength() {
+            return 0;
+        }
+
+        public virtual double ParamAt(int i) {
+            Debug.Assert(false, "layer-Param-At");
+            return 0;
+        }
+
+        public virtual void ParamSet(int i, double p) {
+            Debug.Assert(false, "layer-Param-Set");
+        }
+
+        public virtual Array1 dC_dPs(int batch_idx) {
+            return new Array1(0);
+        }
+
+
+        public virtual Array1 dC_dPByParamIdx(int param_idx) {
+            return new Array1(0);
+        }
+
         public virtual void Forward() {
         }
 
@@ -102,6 +130,8 @@ namespace MachineLearning {
 
         public Array1 Bias;
         public Array2 Weight;
+        public Array1 svBias;
+        public Array2 svWeight;
 
         public Array1 NablaB;
         public Array2 NablaW;
@@ -109,6 +139,8 @@ namespace MachineLearning {
         public Array2 dC_dZ2;
         public Array2 NablaBiases;
         public Array3 NablaWeights;
+        public Array2 svNablaBiases;
+        public Array3 svNablaWeights;
 
         public FullyConnectedLayer(int size) : base() {
 
@@ -124,6 +156,84 @@ namespace MachineLearning {
 
         public override Array2 GetActivation2() {
             return Activation2;
+        }
+
+        public override void SaveParam() {
+            svBias = Bias.Clone();
+            svWeight = Weight.Clone();
+            svNablaBiases = NablaBiases.Clone();
+            svNablaWeights = NablaWeights.Clone();
+            svdC_dA2 = dC_dA2.Clone();
+        }
+
+        public override void RestoreParam() {
+            Bias = svBias.Clone();
+            Weight = svWeight.Clone();
+            NablaBiases = svNablaBiases.Clone();
+            NablaWeights = svNablaWeights.Clone();
+            dC_dA2 = svdC_dA2.Clone();
+        }
+
+        public override int ParamLength() {
+            return Bias.Length + Weight.Length;
+        }
+
+        public override double ParamAt(int i) {
+            if(i < Bias.Length) {
+                return Bias.dt[i];
+            }
+            int j = i - Bias.Length;
+            int r = j / Weight.nCol;
+            int c = j - r * Weight.nCol;
+            return Weight.dt[r,c];
+        }
+
+        public override void ParamSet(int i, double p) {
+            if (i < Bias.Length) {
+                Bias.dt[i] = p;
+                return;
+            }
+            int j = i - Bias.Length;
+            int r = j / Weight.nCol;
+            int c = j - r * Weight.nCol;
+            Weight.dt[r, c] = p;
+        }
+
+        public override Array1 dC_dPs(int batch_idx) {
+            Array1 v = new Array1(ParamLength());
+
+            int param_i = 0;
+            for (int filter_idx = 0; filter_idx < Bias.Length; filter_idx++) {
+                v.dt[param_i] = NablaBiases[batch_idx, filter_idx];
+
+                param_i++;
+            }
+
+            for (int r = 0; r < Weight.nRow; r++) {
+
+                for (int c = 0; c < Weight.nCol; c++) {
+                    v.dt[param_i] = NablaWeights[batch_idx, r, c];
+
+                    param_i++;
+                }
+            }
+            
+            return v;
+        }
+
+        public override Array1 dC_dPByParamIdx(int param_idx) {
+            int mini_batch_size = NablaBiases.nRow;
+
+            if (param_idx < Bias.Length) {
+
+                return new Array1(from batch_idx in Enumerable.Range(0, mini_batch_size) select NablaBiases[batch_idx, param_idx]);
+            }
+
+            int i = param_idx - Bias.Length;
+            int r = i / Weight.nCol;
+            int c = i - r * Weight.nCol;
+
+            return new Array1(from batch_idx in Enumerable.Range(0, mini_batch_size) select NablaWeights[batch_idx, r, c]);
         }
 
         static Dictionary<string, double> SpanC = new Dictionary<string, double>();
@@ -227,7 +337,7 @@ namespace MachineLearning {
             NablaB = new Array1(from c in dC_dZ2.Cols() select c.Sum());
             NablaW = PrevLayer.GetActivation2().T().Dot( dC_dZ2 );
 
-            if (Network.DoVerifyDeltaParam2) {
+            if (Network.DoVerifyFull) {
 
                 // Z = prev-A . Weight + Bias;
                 // dC/dB = dC/dZ * dZ/dB = dC/dZ * 1 = dC/dZ
@@ -267,8 +377,13 @@ namespace MachineLearning {
         public int FilterCount;
         public Array1 Bias;
         public Array3 Weight3;
+        public Array1 svBias;
+        public Array3 svWeight3;
+
         public Array2 NablaBiases;
         public Array4 NablaWeight4;
+        public Array2 svNablaBiases;
+        public Array4 svNablaWeight4;
 
         public ConvolutionalLayer(int filter_size, int filter_count) : base() {
             FilterSize = filter_size;
@@ -277,6 +392,94 @@ namespace MachineLearning {
 
         public override Array4 GetActivation4() {
             return Activation4;
+        }
+
+        public override void SaveParam() {
+            svBias = Bias.Clone();
+            svWeight3 = Weight3.Clone();
+
+            svNablaBiases = NablaBiases.Clone();
+            svNablaWeight4 = NablaWeight4.Clone();
+        }
+
+        public override void RestoreParam() {
+            Bias = svBias.Clone();
+            Weight3 = svWeight3.Clone();
+
+            NablaBiases = svNablaBiases.Clone();
+            NablaWeight4 = svNablaWeight4.Clone();
+        }
+
+        public override int ParamLength() {
+            return Bias.Length + Weight3.Length;
+        }
+
+        public override double ParamAt(int i) {
+            if (i < Bias.Length) {
+                return Bias.dt[i];
+            }
+
+            int d, r, c;
+            Weight3.DecomposeIdx(i - Bias.Length, out d, out r, out c);
+            return Weight3.dt[d, r, c];
+        }
+
+        public override void ParamSet(int i, double p) {
+            if (i < Bias.Length) {
+                Bias.dt[i] = p;
+                return;
+            }
+
+            int d, r, c;
+            Weight3.DecomposeIdx(i - Bias.Length, out d, out r, out c);
+            Weight3.dt[d, r, c] = p;
+        }
+
+        public override Array1 dC_dPs(int batch_idx) {
+            int mini_batch_size = NablaBiases.nRow;
+            Array1 v = new Array1( (NablaBiases.Length + NablaWeight4.Length) / mini_batch_size );
+
+            int param_i = 0;
+            for (int filter_idx = 0; filter_idx < Bias.Length; filter_idx++) {
+                v.dt[param_i] = NablaBiases[batch_idx, filter_idx];
+
+                param_i++;
+            }
+
+            // すべてのフィルターに対し
+            for (int filter_idx = 0; filter_idx < FilterCount; filter_idx++) {
+
+                // フィルターの行に対し
+                for (int r2 = 0; r2 < FilterSize; r2++) {
+
+                    // フィルターの列に対し
+                    for (int c2 = 0; c2 < FilterSize; c2++) {
+                        v.dt[param_i] = NablaWeight4[batch_idx, filter_idx, r2, c2];
+
+                        param_i++;
+                    }
+                }
+            }
+
+            return v;
+        }
+
+        public override Array1 dC_dPByParamIdx(int param_idx) {
+            int mini_batch_size = NablaBiases.nRow;
+
+            if (param_idx < Bias.Length) {
+
+                return new Array1(from batch_idx in Enumerable.Range(0, mini_batch_size) select NablaBiases[batch_idx, param_idx]);
+            }
+
+            int i = param_idx - Bias.Length;
+            int filter_idx = i / (FilterSize * FilterSize);
+
+            i -= filter_idx * (FilterSize * FilterSize);
+            int r2 = i / FilterSize;
+            int c2 = i - r2 * FilterSize;
+
+            return new Array1(from batch_idx in Enumerable.Range(0, mini_batch_size) select NablaWeight4[batch_idx, filter_idx, r2, c2]);
         }
 
         public override void init(Layer prev_layer) {
@@ -1045,7 +1248,7 @@ namespace MachineLearning {
                 Layers[i].backward2(Y);
             }
 
-            if (DoVerifyDeltaParam2 || DoVerifyDeltaParam4 || DoVerifyDeltaActivation2 || DoVerifyDeltaActivation4) {
+            if (DoVerifySingleParam || DoVerifyMultiParam || DoVerifyDeltaActivation2 || DoVerifyDeltaActivation4) {
 
                 Verify(X, Y);
             }
