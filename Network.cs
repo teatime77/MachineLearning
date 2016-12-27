@@ -70,9 +70,12 @@ namespace MachineLearning {
             return new Array1(0);
         }
 
-
         public virtual Array1 dC_dPByParamIdx(int param_idx) {
             return new Array1(0);
+        }
+
+        public virtual double dC_dPByParamIdxAvg(int param_idx) {
+            return double.NaN;
         }
 
         public virtual void Forward() {
@@ -234,6 +237,21 @@ namespace MachineLearning {
             int c = i - r * Weight.nCol;
 
             return new Array1(from batch_idx in Enumerable.Range(0, mini_batch_size) select NablaWeights[batch_idx, r, c]);
+        }
+
+        public override double dC_dPByParamIdxAvg(int param_idx) {
+            int mini_batch_size = NablaBiases.nRow;
+
+            if (param_idx < Bias.Length) {
+
+                return (from batch_idx in Enumerable.Range(0, mini_batch_size) select NablaBiases[batch_idx, param_idx]).Average();
+            }
+
+            int i = param_idx - Bias.Length;
+            int r = i / Weight.nCol;
+            int c = i - r * Weight.nCol;
+
+            return (from batch_idx in Enumerable.Range(0, mini_batch_size) select NablaWeights[batch_idx, r, c]).Average();
         }
 
         static Dictionary<string, double> SpanC = new Dictionary<string, double>();
@@ -480,6 +498,24 @@ namespace MachineLearning {
             int c2 = i - r2 * FilterSize;
 
             return new Array1(from batch_idx in Enumerable.Range(0, mini_batch_size) select NablaWeight4[batch_idx, filter_idx, r2, c2]);
+        }
+
+        public override double dC_dPByParamIdxAvg(int param_idx) {
+            int mini_batch_size = NablaBiases.nRow;
+
+            if (param_idx < Bias.Length) {
+
+                return (from batch_idx in Enumerable.Range(0, mini_batch_size) select NablaBiases[batch_idx, param_idx]).Average();
+            }
+
+            int i = param_idx - Bias.Length;
+            int filter_idx = i / (FilterSize * FilterSize);
+
+            i -= filter_idx * (FilterSize * FilterSize);
+            int r2 = i / FilterSize;
+            int c2 = i - r2 * FilterSize;
+
+            return (from batch_idx in Enumerable.Range(0, mini_batch_size) select NablaWeight4[batch_idx, filter_idx, r2, c2]).Average();
         }
 
         public override void init(Layer prev_layer) {
@@ -1248,47 +1284,74 @@ namespace MachineLearning {
                 Layers[i].backward2(Y);
             }
 
-            if (DoVerifySingleParam || DoVerifyMultiParam || DoVerifyDeltaActivation2 || DoVerifyDeltaActivation4) {
+            if (DoVerifySingleParam || DoVerifyMultiParam || DoVerifyMultiParamAll || DoVerifyDeltaActivation2 || DoVerifyDeltaActivation4) {
 
                 Verify(X, Y);
             }
 
-            foreach (Layer layer in Layers) {
-                layer.UpdateParameter();
+            if (DoVerifyUpdateParameter) {
+
+                VerifyUpdateParameter(X, Y, epoch_idx, mini_batch_cnt, mini_batch_idx);
+            }
+            else {
+
+                foreach (Layer layer in Layers) {
+                    layer.UpdateParameter();
+                }
             }
         }
 
         int Evaluate() {
-            int test_cnt = TestImage.GetLength(0);
+            int e_sum = 0;
+            int test_cnt = 500;
+            int svMiniBatchSize = MiniBatchSize;
+            MiniBatchSize = test_cnt;
+
             int data_len = TestImage.GetLength(1);
 
             Array2 X = new Array2(test_cnt, data_len);
+            int[] label = new int[test_cnt];
 
-            for (int batch_idx = 0; batch_idx < test_cnt; batch_idx++) {
-                for (int k = 0; k < data_len; k++) {
-                    X[batch_idx, k] = TestImage[batch_idx, k] / 256.0;
+            for(int test_idx = 0; test_idx < TestImage.GetLength(0) / test_cnt; test_idx++) {
+
+                int offset = test_idx * test_cnt;
+
+                for (int batch_idx = 0; batch_idx < test_cnt; batch_idx++) {
+                    for (int k = 0; k < data_len; k++) {
+                        X[batch_idx, k] = TestImage[offset + batch_idx, k] / 256.0;
+                    }
+                    label[batch_idx] = TestLabel[offset + batch_idx];
                 }
+
+                if (FirstLayer.NextLayer is FullyConnectedLayer) {
+
+                    FirstLayer.Activation2 = X;
+                }
+                else {
+
+                    FirstLayer.Activation3 = (Array3)X.Reshape(test_cnt, FirstLayer.ImgRows, FirstLayer.ImgCols);
+                }
+
+                foreach (Layer layer in Layers) {
+                    layer.Forward();
+                }
+
+                Array2 result = LastLayer.GetActivation2();
+
+                //Debug.WriteLine("テスト --------------------------------------------------------------------------------");
+                //Debug.WriteLine(result.ToString());
+
+                File.WriteAllText("LastA.csv", result.ToString());
+                Array1 a = new Array1(from r in Enumerable.Range(0, result.nRow) select (double)result.Row(r).ArgMax());
+                File.WriteAllText("ArgMax.csv", a.ToString());
+
+                MiniBatchSize = svMiniBatchSize;
+
+                int e = (int)(from r in Enumerable.Range(0, result.nRow) select result.Row(r).ArgMax() == label[r] ? 1 : 0).Sum();
+                e_sum += e;
             }
 
-            if (FirstLayer.NextLayer is FullyConnectedLayer) {
-
-                FirstLayer.Activation2 = X;
-            }
-            else {
-
-                FirstLayer.Activation3 = (Array3)X.Reshape(test_cnt, FirstLayer.ImgRows, FirstLayer.ImgCols);
-            }
-
-            foreach (Layer layer in Layers) {
-                layer.Forward();
-            }
-
-            Array2 result = LastLayer.GetActivation2();
-
-            //Debug.WriteLine("テスト --------------------------------------------------------------------------------");
-            //Debug.WriteLine(result.ToString());
-
-            return (from r in Enumerable.Range(0, result.nRow) select result.Row(r).ArgMax() == TestLabel[r] ? 1 : 0).Sum();
+            return e_sum;
         }
     }
 

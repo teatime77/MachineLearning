@@ -408,6 +408,15 @@ namespace MachineLearning {
 
             return null;
         }
+
+        public virtual double Sum() {
+            Debug.Assert(false, "Sum is not implemented.");
+            return double.NaN;
+        }
+
+        public virtual double Avg() {
+            return Sum() / Length;
+        }
     }
 
     public class Array1 : ArrayN {
@@ -476,7 +485,7 @@ namespace MachineLearning {
             return x;
         }
 
-        public double Sum() {
+        public override double Sum() {
             return Reduce((double x, double y) => x + y);
         }
 
@@ -509,9 +518,8 @@ namespace MachineLearning {
             StringWriter sw = new StringWriter();
 
             for (int i = 0; i < Length; i++) {
-                sw.Write("\t{0}", dt[i]);
+                sw.WriteLine("{0}", dt[i]);
             }
-            sw.WriteLine();
 
             return sw.ToString();
         }
@@ -685,7 +693,7 @@ namespace MachineLearning {
             return m3;
         }
 
-        public double Sum() {
+        public override double Sum() {
             double sum = 0;
             for (int r = 0; r < nRow; r++) {
                 for (int c = 0; c < nCol; c++) {
@@ -727,7 +735,7 @@ namespace MachineLearning {
 
             for (int r = 0; r < nRow; r++) {
                 for (int c = 0; c < nCol; c++) {
-                    sw.Write("\t{0}", dt[r, c]);
+                    sw.Write(",{0}", dt[r, c]);
                 }
                 sw.WriteLine();
             }
@@ -862,7 +870,7 @@ namespace MachineLearning {
             return m3;
         }
 
-        public double Sum() {
+        public override double Sum() {
             double sum = 0;
             for (int d = 0; d < nDepth; d++) {
                 for (int r = 0; r < nRow; r++) {
@@ -1063,7 +1071,7 @@ namespace MachineLearning {
             return max;
         }
 
-        public double Sum() {
+        public override double Sum() {
             int n0 = dt.GetLength(0);
             int n1 = dt.GetLength(1);
             int n2 = dt.GetLength(2);

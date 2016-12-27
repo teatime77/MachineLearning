@@ -13,18 +13,18 @@ namespace MachineLearning {
         public static bool DoVerifyFull = true;
         public static bool DoVerifyConv = true;
         public static bool DoVerifySingleParam = false;
-        public static bool DoVerifyMultiParam = true;
-        public static bool DoVerifyMultiParamAll = true;
+        public static bool DoVerifyMultiParam = false;
+        public static bool DoVerifyMultiParamAll = false;
         public static bool DoVerifyDeltaActivation2 = false;
         public static bool DoVerifyDeltaActivation4 = false;
+        public static bool DoVerifyUpdateParameter = true;
 
         Array3 LastActivation;
         Array3 DiffA;
+        Array2 diffCosts;
+        Array3 Result;
 
         void Output(string path, Array3 ret) {
-            double err = ret.Map(Math.Abs).Max();
-            double avg = ret.Map(Math.Abs).Sum() / ret.dt.Length;
-
             File.WriteAllText(path + ".csv", ret.ToString());
         }
 
@@ -326,16 +326,8 @@ namespace MachineLearning {
             }
         }
 
-        void Verify(Array2 X, Array2 Y) {
-            Array3 ret = null;
-            int i_ret;
-            double delta_param;
-
-            foreach (PoolingLayer player in from x in Layers where x is PoolingLayer select x) {
-                player.RetainMaxIdx = true;
-            }
-
-            Array1 sv_cost = LastLayer.Cost.Clone();
+        void SaveParamData(out Array1 sv_cost) {
+            sv_cost = LastLayer.Cost.Clone();
 
             foreach (Layer layer in Layers) {
                 layer.SaveParam();
@@ -353,14 +345,162 @@ namespace MachineLearning {
                         PoolingLayer player = layer as PoolingLayer;
                         player.svActivation2 = player.Activation2.Clone();
                     }
-                    else if(layer is ConvolutionalLayer) {
+                    else if (layer is ConvolutionalLayer) {
                         ConvolutionalLayer cnv_layer = layer as ConvolutionalLayer;
 
                         cnv_layer.svZ4 = cnv_layer.Z4.Clone();
                     }
                 }
             }
+        }
 
+        void VerifyUpdateParameter(Array2 X, Array2 Y, int epoch_idx, int mini_batch_cnt, int mini_batch_idx) {
+            if (mini_batch_idx % 100 != 0) {
+
+                foreach (Layer layer in Layers) {
+                    int param_len = layer.ParamLength();
+                    if (param_len != 0) {
+
+                        for (int param_i = 0; param_i < param_len; param_i++) {
+
+                            double dC_dP = layer.dC_dPByParamIdxAvg(param_i);
+                            double delta_param = dC_dP * -0.1;
+                            layer.ParamSet(param_i, layer.ParamAt(param_i) + delta_param);
+                        }
+                    }
+                }
+                return;
+            }
+
+
+            if (diffCosts == null || diffCosts.nRow != mini_batch_cnt) {
+                diffCosts = new Array2(mini_batch_cnt, 4);
+                Result = new Array3(mini_batch_cnt, Y.nRow, 10);
+            }
+
+            foreach (PoolingLayer player in from x in Layers where x is PoolingLayer select x) {
+                player.RetainMaxIdx = true;
+            }
+
+            Array1 sv_cost;
+            SaveParamData(out sv_cost);
+
+            int param_len_sum = (from layer in Layers select layer.ParamLength()).Sum();
+            Array1 dPall = new Array1(param_len_sum);
+            Array1 dC_dPall = new Array1(param_len_sum);
+            int param_idx_all = 0;
+            foreach (Layer layer in Layers) {
+
+                int param_len = layer.ParamLength();
+                if (param_len != 0) {
+
+                    layer.RestoreParam();
+
+                    Array1 dP = new Array1(param_len);
+
+                    for (int param_i = 0; param_i < param_len; param_i++) {
+
+                        double dC_dP = layer.dC_dPByParamIdxAvg(param_i);
+                        dP[param_i] = dC_dP * -0.1;
+                        layer.ParamSet(param_i, layer.ParamAt(param_i) + dP[param_i]);
+
+                        dPall[param_idx_all] = dP[param_i];
+                        dC_dPall[param_idx_all] = dC_dP;
+                        param_idx_all++;
+                    }
+                }
+            }
+
+            foreach (Layer l in Layers) {
+                l.forward2();
+            }
+
+            for (Layer l = LastLayer; l != null; l = l.PrevLayer) {
+                l.backward2(Y);
+            }
+
+            // ΔC
+            Array1 dC = LastLayer.Cost - sv_cost;
+
+            // Σ ΔPi * δC/δPi
+            double dP_dC_dP = (dPall * dC_dPall).Sum();
+
+            // ΔC ≒ ΔP * δC/δP 
+            double c_avg = LastLayer.Cost.Avg();
+            double dc_avg = dC.Avg();
+            double diff, ratio;
+            CheckEqual0(dc_avg, dP_dC_dP, out diff, out ratio);
+
+            diffCosts.dt[mini_batch_idx, 0] = c_avg;
+            diffCosts.dt[mini_batch_idx, 1] = dc_avg;
+            diffCosts.dt[mini_batch_idx, 2] = diff;
+            diffCosts.dt[mini_batch_idx, 3] = ratio;
+
+            for(int r = 0; r < Y.nRow; r++) {
+                for (int c = 0; c < 10; c++) {
+                    Result.dt[mini_batch_idx, r, c] = LastLayer.svdC_dA2.dt[r, c];
+                }
+            }
+
+            if (mini_batch_idx % 10 == 0) {
+                Debug.WriteLine("{0} cost:{1}  dC avg:{2} diff:{3} ratio:{4}", mini_batch_idx, c_avg, dc_avg, diff, ratio);
+
+                if (mini_batch_idx % 100 == 0) {
+
+                    StringWriter sw = new StringWriter();
+
+                    for (int r = 0; r <= mini_batch_idx; r++) {
+                        for (int c = 0; c < 4; c++) {
+                            sw.Write(",{0}", diffCosts.dt[r, c]);
+                        }
+                        sw.WriteLine();
+                    }
+
+                    try {
+                        File.WriteAllText("Cost.csv", sw.ToString());
+
+                    }
+                    catch (Exception) { }
+
+                    sw = new StringWriter();
+
+                    for (int d = 0; d <= mini_batch_idx; d++) {
+                        for(int r = 0; r < Y.nRow; r++) {
+                            for (int c = 0; c < 10; c++) {
+                                sw.Write(",{0}", Result.dt[d, r, c]);
+                            }
+                            sw.WriteLine();
+                        }
+                    }
+
+                    try {
+                        File.WriteAllText("Result.csv", sw.ToString());
+                    }
+                    catch (Exception) { }
+                }
+            }
+
+            foreach (PoolingLayer player in from x in Layers where x is PoolingLayer select x) {
+                player.RetainMaxIdx = false;
+            }
+
+            if (mini_batch_idx % 500 == 0) {
+                int e = Evaluate();
+                Debug.WriteLine("Epoch {0}: {1} / {2}", epoch_idx, e, TestImage.GetLength(0));
+            }
+        }
+
+        void Verify(Array2 X, Array2 Y) {
+            Array3 ret = null;
+            int i_ret;
+            double delta_param;
+
+            foreach (PoolingLayer player in from x in Layers where x is PoolingLayer select x) {
+                player.RetainMaxIdx = true;
+            }
+
+            Array1 sv_cost;
+            SaveParamData(out sv_cost);
 
             if (DoVerifyMultiParamAll) {
                 ret = new Array3(MiniBatchSize, 3, 2);
@@ -414,12 +554,11 @@ namespace MachineLearning {
                     i_ret++;
                 }
                 Output("Multi-Param-All", ret);
-
-                foreach (Layer layer in Layers) {
-                    layer.RestoreParam();
-                }
             }
 
+            foreach (Layer layer in Layers) {
+                layer.RestoreParam();
+            }
 
             for (Layer layer = LastLayer; layer != null; layer = layer.PrevLayer) {
                 int layer_idx = Layers.ToList().IndexOf(layer);
