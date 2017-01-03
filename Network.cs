@@ -4,6 +4,7 @@ using System.Linq;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.IO;
+using System.Threading.Tasks;
 
 namespace MachineLearning {
     public class Layer {
@@ -135,9 +136,6 @@ namespace MachineLearning {
         public Array2 Weight;
         public Array1 svBias;
         public Array2 svWeight;
-
-        public Array1 NablaB;
-        public Array2 NablaW;
 
         public Array2 dC_dZ2;
         public Array2 NablaBiases;
@@ -352,9 +350,6 @@ namespace MachineLearning {
             // dC/dZ = dC/dA * dA/dZ
             dC_dZ2 = dC_dA2 * Z2.Map(Sys.SigmoidPrime);
 
-            NablaB = new Array1(from c in dC_dZ2.Cols() select c.Sum());
-            NablaW = PrevLayer.GetActivation2().T().Dot( dC_dZ2 );
-
             if (Network.DoVerifyFull) {
 
                 // Z = prev-A . Weight + Bias;
@@ -374,8 +369,11 @@ namespace MachineLearning {
         }
 
         public override void UpdateParameter() {
+            Array1 NablaB = new Array1(from c in dC_dZ2.Cols() select c.Sum());
+            Array2 NablaW = PrevLayer.GetActivation2().T().Dot( dC_dZ2 );
+
+            Bias   = Bias   - Network.Eta2 * NablaB;
             Weight = Weight - Network.Eta2 * NablaW;
-            Bias = Bias - Network.Eta2 * NablaB;
         }
     }
 
@@ -779,18 +777,16 @@ namespace MachineLearning {
 
             if (BGCnt % 100 == 0) {
 
-                Debug.WriteLine("BG {0} {1} {2} {3}", BGSpan[0] / BGCnt, BGSpan[1] / BGCnt, BGSpan[2] / BGCnt, BGSpan[3] / BGCnt);
+//                Debug.WriteLine("BG {0} {1} {2} {3}", BGSpan[0] / BGCnt, BGSpan[1] / BGCnt, BGSpan[2] / BGCnt, BGSpan[3] / BGCnt);
             }
         }
 
         public override void UpdateParameter() {
-            double eta3 = Network.Eta2 / (FilterSize * FilterSize);
-
             // すべてのフィルターに対し
-            for (int filter_idx = 0; filter_idx < FilterCount; filter_idx++) {
-
+            //for (int filter_idx = 0; filter_idx < FilterCount; filter_idx++) { }
+            Parallel.For(0, FilterCount, filter_idx => {
                 double nabla_bias = (from batch_idx in Enumerable.Range(0, Network.MiniBatchSize) select NablaBiases[batch_idx, filter_idx]).Sum();
-                Bias[filter_idx] -= eta3 * nabla_bias;
+                Bias[filter_idx] -= Network.Eta2 * nabla_bias;
 
                 // フィルターの行に対し
                 for (int r2 = 0; r2 < FilterSize; r2++) {
@@ -804,10 +800,10 @@ namespace MachineLearning {
                             nabla_w += NablaWeight4[batch_idx, filter_idx, r2, c2];
                         }
 
-                        Weight3[filter_idx, r2, c2] -= eta3 * nabla_w;
+                        Weight3[filter_idx, r2, c2] -= Network.Eta2 * nabla_w;
                     }
                 }
-            }
+            });
         }
     }
 
@@ -846,7 +842,10 @@ namespace MachineLearning {
         }
 
         public override void Forward() {
+            TW tw1 = new TW("pool-forward 1");
+
             ConvolutionalLayer prev_Layer = PrevLayer as ConvolutionalLayer;
+
             if (! RetainMaxIdx) {
 
                 Activation4 = new Array4(Network.MiniBatchSize, ImgRows, ImgCols, FilterCount);
@@ -902,16 +901,23 @@ namespace MachineLearning {
                 }
             }
 
+            tw1.Lap("pool-forward 2");
             Activation2 = (Array2)Activation4.Reshape(Network.MiniBatchSize, ImgRows * ImgCols * FilterCount);
+
+            tw1.Stop();
         }
 
         public override void Backward(Array2 Y) {
+            TW tw1 = new TW("pool-backward 1");
+
             ConvolutionalLayer prev_Layer = PrevLayer as ConvolutionalLayer;
             FullyConnectedLayer next_layer = NextLayer as FullyConnectedLayer;
 
             dC_dA4 = (Array4)next_layer.dC_dZ2.Dot(next_layer.Weight.T()).Reshape(Activation4.Shape());
+            tw1.Lap("pool-backward 2");
 
             dC_dZ4 = new Array4(prev_Layer.Activation4.Shape());
+            tw1.Lap("pool-backward 3");
 
             // バッチ内のデータに対し
             for (int batch_idx = 0; batch_idx < Network.MiniBatchSize; batch_idx++) {
@@ -935,6 +941,7 @@ namespace MachineLearning {
                     }
                 }
             }
+            tw1.Stop();
         }
     }
 
@@ -1231,21 +1238,29 @@ namespace MachineLearning {
             get { return Layers[0] as InputLayer; }
         }
 
-        public void SGD(int epochs) {
+        public void SGD() {
             Network.TestCUDA();
 
             int train_cnt = TrainImage.GetLength(0);
             int data_len = TrainImage.GetLength(1);
             int mini_batch_cnt = train_cnt / MiniBatchSize;
 
-            LastActivation = new Array3(epochs, mini_batch_cnt, 10);
+            LastActivation = new Array3(Epochs, mini_batch_cnt, 10);
             DiffA = new Array3(mini_batch_cnt, MiniBatchSize, 10);
 
-            for (int epoch_idx = 0; epoch_idx < epochs; epoch_idx++) {
+            for (int epoch_idx = 0; epoch_idx < Epochs; epoch_idx++) {
+                Sys.CudaSetDevice(0);
+
+                //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                //int e1 = Evaluate();
+                //Debug.WriteLine("Epoch {0}: {1} / {2}", epoch_idx, e1, TestImage.GetLength(0));
+                //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 
                 int[] idxes = Sys.RandomSampling(train_cnt, train_cnt);
 
                 for (int mini_batch_idx = 0; mini_batch_idx < mini_batch_cnt; mini_batch_idx++ ) {
+
                     Array2 X = new Array2(MiniBatchSize, data_len);
                     Array2 Y = new Array2(MiniBatchSize, 10);
 
@@ -1259,14 +1274,25 @@ namespace MachineLearning {
                     }
 
                     UpdateMiniBatch(X, Y, epoch_idx, idxes, mini_batch_cnt, mini_batch_idx);
+
+                    if(mini_batch_idx % 100 == 0) {
+                        if (mini_batch_idx % 1000 == 0) {
+
+                            //TW.Stats();
+                        }
+                        Debug.WriteLine("Epoch {0}: idx:{1} cost:{2}", epoch_idx, mini_batch_idx, LastLayer.Cost.Avg());
+                    }
                 }
 
                 int e = Evaluate();
                 Debug.WriteLine("Epoch {0}: {1} / {2}", epoch_idx, e, TestImage.GetLength(0));
+
+                Sys.CudaDeviceReset();
             }
         }
 
         void UpdateMiniBatch(Array2 X, Array2 Y, int epoch_idx, int[] idxes, int mini_batch_cnt, int mini_batch_idx) {
+            TW tw1 = new TW("update-mini-batch forward");
             if(FirstLayer.NextLayer is FullyConnectedLayer) {
 
                 FirstLayer.Activation2 = X;
@@ -1279,10 +1305,12 @@ namespace MachineLearning {
             foreach (Layer layer in Layers) {
                 layer.forward2();
             }
+            tw1.Lap("update-mini-batch back");
 
             for (int i = Layers.Length - 1; 1 <= i; i--) {
                 Layers[i].backward2(Y);
             }
+            tw1.Lap("update-mini-batch param");
 
             if (DoVerifySingleParam || DoVerifyMultiParam || DoVerifyMultiParamAll || DoVerifyDeltaActivation2 || DoVerifyDeltaActivation4) {
 
@@ -1299,6 +1327,7 @@ namespace MachineLearning {
                     layer.UpdateParameter();
                 }
             }
+            tw1.Stop();
         }
 
         int Evaluate() {
@@ -1311,6 +1340,7 @@ namespace MachineLearning {
 
             Array2 X = new Array2(test_cnt, data_len);
             int[] label = new int[test_cnt];
+            StringWriter sw = new StringWriter();
 
             for(int test_idx = 0; test_idx < TestImage.GetLength(0) / test_cnt; test_idx++) {
 
@@ -1343,13 +1373,18 @@ namespace MachineLearning {
 
                 File.WriteAllText("LastA.csv", result.ToString());
                 Array1 a = new Array1(from r in Enumerable.Range(0, result.nRow) select (double)result.Row(r).ArgMax());
-                File.WriteAllText("ArgMax.csv", a.ToString());
-
-                MiniBatchSize = svMiniBatchSize;
+                Debug.Assert(a.Length == label.Length);
+                for (int i = 0; i < a.Length; i++) {
+                    sw.WriteLine("{0},{1}", a.dt[i], label[i]);
+                }
 
                 int e = (int)(from r in Enumerable.Range(0, result.nRow) select result.Row(r).ArgMax() == label[r] ? 1 : 0).Sum();
                 e_sum += e;
             }
+
+            File.WriteAllText("ArgMax.csv", sw.ToString());
+
+            MiniBatchSize = svMiniBatchSize;
 
             return e_sum;
         }

@@ -6,18 +6,19 @@ using System.IO;
 
 namespace MachineLearning {
     public partial class Network {
+        public static int Epochs = 100;
         public static int MiniBatchSize = 10;
-        public static double Eta = 3.0;        // 10.0
+        public static double Eta = 0.1;//3.0 ;//1.0 ;        // 10.0
         public static double Eta2 = Eta / MiniBatchSize;
 
-        public static bool DoVerifyFull = true;
-        public static bool DoVerifyConv = true;
+        public static bool DoVerifyFull = false;
+        public static bool DoVerifyConv = false;
         public static bool DoVerifySingleParam = false;
         public static bool DoVerifyMultiParam = false;
         public static bool DoVerifyMultiParamAll = false;
         public static bool DoVerifyDeltaActivation2 = false;
         public static bool DoVerifyDeltaActivation4 = false;
-        public static bool DoVerifyUpdateParameter = true;
+        public static bool DoVerifyUpdateParameter = false;
 
         Array3 LastActivation;
         Array3 DiffA;
@@ -355,7 +356,7 @@ namespace MachineLearning {
         }
 
         void VerifyUpdateParameter(Array2 X, Array2 Y, int epoch_idx, int mini_batch_cnt, int mini_batch_idx) {
-            if (mini_batch_idx % 100 != 0) {
+            if (true || mini_batch_idx % 100 != 0) {
 
                 foreach (Layer layer in Layers) {
                     int param_len = layer.ParamLength();
@@ -763,5 +764,62 @@ namespace MachineLearning {
             ratio = A.Apply((double x, double y) => Math.Abs(y - x) * (x == 0 ? 1 : 1 / x), B).Max();
         }
 
+    }
+
+    public class TWData {
+        public string Name;
+        public double Span;
+        public int Cnt;
+
+        public TWData(string name) {
+            Name = name;
+        }
+    }
+
+    public class TW {
+        public static Dictionary<string, TWData> dicTW = new Dictionary<string, TWData>();
+        public static List<TWData> vTW = new List<TWData>();
+        public string Name;
+        DateTime StartTime;
+
+        public static void Stats() {
+            foreach(TWData dt in vTW) {
+                Debug.WriteLine("{0} {1} {2:0.0}", dt.Name, dt.Cnt, dt.Span / dt.Cnt);
+            }
+        }
+
+        public TW(string format, params object[] args) {
+            Name = string.Format(format, args);
+            StartTime = DateTime.Now;
+        }
+
+        public void Start(string format, params object[] args) {
+            Name = string.Format(format, args);
+            StartTime = DateTime.Now;
+        }
+
+        void Update() {
+            TWData dt;
+
+            if(! dicTW.TryGetValue(Name, out dt)) {
+                dt = new TWData(Name);
+                dicTW.Add(Name, dt);
+                vTW.Add(dt);
+            }
+
+            dt.Span += (DateTime.Now - StartTime).TotalMilliseconds;
+            dt.Cnt++;
+        }
+
+        public void Lap(string format, params object[] args) {
+            Update();
+
+            Name = string.Format(format, args);
+            StartTime = DateTime.Now;
+        }
+
+        public void Stop() {
+            Update();
+        }
     }
 }

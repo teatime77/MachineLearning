@@ -54,7 +54,7 @@ namespace MachineLearning {
                     new InputLayer(28, 28),
                     new ConvolutionalLayer(5, 20),
                     new PoolingLayer(2),
-                    new FullyConnectedLayer(30),
+                    new FullyConnectedLayer(100),
                     new FullyConnectedLayer(10)
                 });
             }
@@ -103,7 +103,7 @@ namespace MachineLearning {
             Buffer.BlockCopy(buf, 8, theNetwork.TestLabel, 0, test_cnt);
 
             Task.Run(() => {
-                theNetwork.SGD(30);
+                theNetwork.SGD();
             });
 
             PaintTimer = new DispatcherTimer(DispatcherPriority.Normal);
@@ -637,9 +637,22 @@ namespace MachineLearning {
         }
 
         public Array2 Dot(Array2 m) {
+            TW tw1 = new TW("dot-{0}x{1}x{2}", nRow, nCol, m.nCol);
             Debug.Assert(nCol == m.nRow, "ndarray-2-dot");
             Array2 ret = new Array2(nRow, m.nCol);
 
+            Parallel.For(0, nRow, r => {
+                for (int c = 0; c < m.nCol; c++) {
+                    double sum = 0;
+                    for (int k = 0; k < nCol; k++) {
+                        sum += dt[r, k] * m.dt[k, c];
+                    }
+                    ret.dt[r, c] = sum;
+                }
+            }
+            );
+
+/*
             for (int r = 0; r < nRow; r++) {
                 for (int c = 0; c < m.nCol; c++) {
                     double sum = 0;
@@ -649,6 +662,12 @@ namespace MachineLearning {
                     ret.dt[r, c] = sum;
                 }
             }
+
+            double d = (ret2 - ret).Map(Math.Abs).Max();
+            Debug.Assert(d == 0);
+ */
+
+            tw1.Stop();
 
             return ret;
         }
